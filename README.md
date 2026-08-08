@@ -1,5 +1,7 @@
 # FlightStack
 
+[![CI](https://github.com/PaulBoyko1/FlightStack/actions/workflows/ci.yml/badge.svg)](https://github.com/PaulBoyko1/FlightStack/actions/workflows/ci.yml)
+
 **A simulation-first attitude-control stack built to make frame mistakes, unstable gains, and hardware assumptions fail in tests before they reach a motor.**
 
 FlightStack is a small flight-control laboratory: quaternion attitude math, a cascaded attitude/rate controller, rotational rigid-body dynamics, IMU simulation, a complementary estimator, binary HIL framing, and a dependency-free C++20 control core for eventual MCU work.
