@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: pip install -e '.[dev]'
+      - name: Lint
+        run: ruff check .
+      - name: Type check minimum supported Python
+        if: matrix.python-version == '3.11'
+        run: mypy src
+      - name: Test
+        run: pytest --cov=flightstack --cov-report=term-missing --cov-fail-under=75
+      - name: Build package
+        run: python -m build
+
+  cpp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build cpp/build --parallel
+      - name: Test
+        run: ctest --test-dir cpp/build --output-on-failure
