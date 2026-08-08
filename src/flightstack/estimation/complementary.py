@@ -17,7 +17,12 @@ class ComplementaryAttitudeEstimator:
     as a body-rate feedback term, similar to the proportional part of a Mahony filter.
     """
 
-    def __init__(self, *, accel_correction_gain: float = 1.8, initial_q: ArrayLike = (1, 0, 0, 0)) -> None:
+    def __init__(
+        self,
+        *,
+        accel_correction_gain: float = 1.8,
+        initial_q: ArrayLike = (1, 0, 0, 0),
+    ) -> None:
         if accel_correction_gain < 0.0 or not np.isfinite(accel_correction_gain):
             raise ValueError("accel_correction_gain must be finite and nonnegative")
         self.gain = float(accel_correction_gain)

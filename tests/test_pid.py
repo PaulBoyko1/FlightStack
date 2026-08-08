@@ -1,9 +1,17 @@
 import numpy as np
+
 from flightstack.control.pid import VectorPID
 
 
 def make_pid() -> VectorPID:
-    return VectorPID([2, 2, 2], [1, 1, 1], [0.1, 0.1, 0.1], output_limit=1.0, integral_limit=0.5, derivative_cutoff_hz=20)
+    return VectorPID(
+        [2, 2, 2],
+        [1, 1, 1],
+        [0.1, 0.1, 0.1],
+        output_limit=1.0,
+        integral_limit=0.5,
+        derivative_cutoff_hz=20,
+    )
 
 
 def test_pid_saturates_and_prevents_windup() -> None:

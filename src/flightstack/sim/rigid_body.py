@@ -20,7 +20,13 @@ class RigidBodyState:
 
 
 class RigidBody:
-    def __init__(self, inertia: ArrayLike, *, attitude: ArrayLike | None = None, body_rate: ArrayLike | None = None) -> None:
+    def __init__(
+        self,
+        inertia: ArrayLike,
+        *,
+        attitude: ArrayLike | None = None,
+        body_rate: ArrayLike | None = None,
+    ) -> None:
         matrix = np.asarray(inertia, dtype=float)
         if matrix.shape != (3, 3) or not np.all(np.isfinite(matrix)):
             raise ValueError("inertia must be a finite 3x3 matrix")
@@ -29,7 +35,10 @@ class RigidBody:
         if np.min(np.linalg.eigvalsh(matrix)) <= 0.0:
             raise ValueError("inertia must be positive definite")
         self.inertia: Matrix = matrix
-        self.state = RigidBodyState(normalize([1.0, 0.0, 0.0, 0.0] if attitude is None else attitude), np.asarray(np.zeros(3) if body_rate is None else body_rate, dtype=float))
+        self.state = RigidBodyState(
+            normalize([1.0, 0.0, 0.0, 0.0] if attitude is None else attitude),
+            np.asarray(np.zeros(3) if body_rate is None else body_rate, dtype=float),
+        )
         if self.state.body_rate.shape != (3,) or not np.all(np.isfinite(self.state.body_rate)):
             raise ValueError("body_rate must be a finite 3-vector")
 

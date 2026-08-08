@@ -20,7 +20,14 @@ class IMUSample:
 
 
 class IMUSimulator:
-    def __init__(self, *, gyro_bias_rad_s: ArrayLike = (0.0, 0.0, 0.0), gyro_noise_std: float = 0.0, accel_noise_std: float = 0.0, seed: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        gyro_bias_rad_s: ArrayLike = (0.0, 0.0, 0.0),
+        gyro_noise_std: float = 0.0,
+        accel_noise_std: float = 0.0,
+        seed: int = 0,
+    ) -> None:
         self.gyro_bias = np.asarray(gyro_bias_rad_s, dtype=float)
         if self.gyro_bias.shape != (3,):
             raise ValueError("gyro_bias_rad_s must be a 3-vector")
@@ -30,7 +37,12 @@ class IMUSimulator:
         self.accel_noise_std = float(accel_noise_std)
         self.rng = np.random.default_rng(seed)
 
-    def sample(self, timestamp_s: float, attitude_q: ArrayLike, body_rate: ArrayLike) -> IMUSample:
+    def sample(
+        self,
+        timestamp_s: float,
+        attitude_q: ArrayLike,
+        body_rate: ArrayLike,
+    ) -> IMUSample:
         omega = np.asarray(body_rate, dtype=float)
         if omega.shape != (3,):
             raise ValueError("body_rate must be a 3-vector")

@@ -12,7 +12,15 @@ Vector = NDArray[np.float64]
 
 
 class AttitudeController:
-    def __init__(self, *, attitude_kp: ArrayLike, rate_pid: VectorPID, max_rate_rad_s: ArrayLike | float) -> None:
+    """Quaternion P outer loop feeding a rate PID inner loop."""
+
+    def __init__(
+        self,
+        *,
+        attitude_kp: ArrayLike,
+        rate_pid: VectorPID,
+        max_rate_rad_s: ArrayLike | float,
+    ) -> None:
         self.attitude_kp = np.asarray(attitude_kp, dtype=float)
         if self.attitude_kp.shape != (3,) or np.any(self.attitude_kp < 0.0):
             raise ValueError("attitude_kp must be a nonnegative 3-vector")
@@ -31,7 +39,13 @@ class AttitudeController:
         rate = self.attitude_kp * rotation_vector_error(current_q, target_q)
         return np.clip(rate, -self.max_rate_rad_s, self.max_rate_rad_s)
 
-    def update(self, current_q: ArrayLike, target_q: ArrayLike, body_rate: ArrayLike, dt: float) -> tuple[Vector, PIDTerms]:
+    def update(
+        self,
+        current_q: ArrayLike,
+        target_q: ArrayLike,
+        body_rate: ArrayLike,
+        dt: float,
+    ) -> tuple[Vector, PIDTerms]:
         desired_rate = self.desired_body_rate(current_q, target_q)
         terms = self.rate_pid.update(desired_rate, body_rate, dt)
         return desired_rate, terms

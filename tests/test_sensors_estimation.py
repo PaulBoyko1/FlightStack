@@ -1,4 +1,5 @@
 import numpy as np
+
 from flightstack.estimation.complementary import ComplementaryAttitudeEstimator
 from flightstack.math.quaternion import from_euler, rotate_inverse
 from flightstack.sensors.imu import IMUSimulator
@@ -15,7 +16,10 @@ def test_imu_is_deterministic_for_seed() -> None:
 
 def test_complementary_filter_reduces_tilt_error_at_rest() -> None:
     true_q = from_euler(0.0, 0.0, 0.0)
-    estimator = ComplementaryAttitudeEstimator(accel_correction_gain=2.5, initial_q=from_euler(np.deg2rad(20), np.deg2rad(-15), 0.0))
+    estimator = ComplementaryAttitudeEstimator(
+        accel_correction_gain=2.5,
+        initial_q=from_euler(np.deg2rad(20), np.deg2rad(-15), 0.0),
+    )
     imu = IMUSimulator()
     true_up = np.array([0.0, 0.0, 1.0])
     initial_up = rotate_inverse(estimator.attitude, true_up)

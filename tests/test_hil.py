@@ -1,4 +1,5 @@
 import pytest
+
 from flightstack.hil.protocol import Packet, crc16_ccitt
 
 

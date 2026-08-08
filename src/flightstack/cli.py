@@ -20,9 +20,27 @@ def _simulate(args: argparse.Namespace) -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["time_s", "error_deg", "p_rad_s", "q_rad_s", "r_rad_s", "tx_Nm", "ty_Nm", "tz_Nm"])
+            writer.writerow(
+                [
+                    "time_s",
+                    "error_deg",
+                    "p_rad_s",
+                    "q_rad_s",
+                    "r_rad_s",
+                    "tx_Nm",
+                    "ty_Nm",
+                    "tz_Nm",
+                ]
+            )
             for index, time_s in enumerate(telemetry.time_s):
-                writer.writerow([time_s, np.rad2deg(telemetry.attitude_error_rad[index]), *telemetry.body_rate[index], *telemetry.torque[index]])
+                writer.writerow(
+                    [
+                        time_s,
+                        np.rad2deg(telemetry.attitude_error_rad[index]),
+                        *telemetry.body_rate[index],
+                        *telemetry.torque[index],
+                    ]
+                )
         print(f"telemetry: {path}")
     return 0
 

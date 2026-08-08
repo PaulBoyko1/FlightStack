@@ -1,7 +1,17 @@
 import numpy as np
 import pytest
 
-from flightstack.math.quaternion import conjugate, error_vector, from_axis_angle, from_euler, geodesic_angle, integrate_body_rate, multiply, normalize, rotate
+from flightstack.math.quaternion import (
+    conjugate,
+    error_vector,
+    from_axis_angle,
+    from_euler,
+    geodesic_angle,
+    integrate_body_rate,
+    multiply,
+    normalize,
+    rotate,
+)
 
 
 def test_q_and_negative_q_represent_same_attitude() -> None:
@@ -11,14 +21,16 @@ def test_q_and_negative_q_represent_same_attitude() -> None:
 
 def test_multiply_by_conjugate_is_identity() -> None:
     q = from_euler(0.2, 0.4, -0.6)
-    np.testing.assert_allclose(normalize(multiply(q, conjugate(q))), [1, 0, 0, 0], atol=1e-12)
+    result = normalize(multiply(q, conjugate(q)))
+    np.testing.assert_allclose(result, [1, 0, 0, 0], atol=1e-12)
 
 
 def test_constant_rate_integration_matches_axis_angle() -> None:
     q = np.array([1.0, 0.0, 0.0, 0.0])
     omega = np.array([0.0, 0.0, 1.2])
+    dt = 0.001
     for _ in range(1000):
-        q = integrate_body_rate(q, omega, 0.001)
+        q = integrate_body_rate(q, omega, dt)
     expected = from_axis_angle([0, 0, 1], 1.2)
     assert geodesic_angle(q, expected) < 1e-9
     assert np.linalg.norm(q) == pytest.approx(1.0, abs=1e-12)
