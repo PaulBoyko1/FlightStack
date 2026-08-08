@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flightstack"
+version = "0.1.0"
+description = "Simulation-first quaternion attitude control and HIL toolkit"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Paul Boyko"}]
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "mypy>=1.11",
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+flightstack = "flightstack.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["flightstack"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
