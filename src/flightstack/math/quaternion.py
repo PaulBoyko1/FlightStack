@@ -13,7 +13,7 @@ Vector = NDArray[np.float64]
 
 
 def _vec(value: ArrayLike, size: int, name: str) -> Vector:
-    out = np.asarray(value, dtype=float)
+    out = np.asarray(value, dtype=np.float64)
     if out.shape != (size,) or not np.all(np.isfinite(out)):
         raise ValueError(f"{name} must be a finite vector with shape ({size},)")
     return out
@@ -29,7 +29,7 @@ def normalize(q: ArrayLike) -> Vector:
 
 def conjugate(q: ArrayLike) -> Vector:
     w, x, y, z = _vec(q, 4, "quaternion")
-    return np.array([w, -x, -y, -z], dtype=float)
+    return np.array([w, -x, -y, -z], dtype=np.float64)
 
 
 def multiply(lhs: ArrayLike, rhs: ArrayLike) -> Vector:
@@ -42,7 +42,7 @@ def multiply(lhs: ArrayLike, rhs: ArrayLike) -> Vector:
             w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
             w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
         ],
-        dtype=float,
+        dtype=np.float64,
     )
 
 
@@ -51,10 +51,13 @@ def from_axis_angle(axis: ArrayLike, angle_rad: float) -> Vector:
     axis_norm = float(np.linalg.norm(axis_vec))
     if axis_norm < 1e-12:
         if abs(angle_rad) < 1e-12:
-            return np.array([1.0, 0.0, 0.0, 0.0])
+            return np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
         raise ValueError("nonzero rotation requires a nonzero axis")
     half = 0.5 * float(angle_rad)
-    return np.concatenate(([np.cos(half)], axis_vec / axis_norm * np.sin(half)))
+    result = np.concatenate(
+        ([np.cos(half)], axis_vec / axis_norm * np.sin(half))
+    )
+    return np.asarray(result, dtype=np.float64)
 
 
 def from_rotation_vector(rotation: ArrayLike) -> Vector:
@@ -77,7 +80,8 @@ def from_euler(roll: float, pitch: float, yaw: float) -> Vector:
                 sr * cp * cy - cr * sp * sy,
                 cr * sp * cy + sr * cp * sy,
                 cr * cp * sy - sr * sp * cy,
-            ]
+            ],
+            dtype=np.float64,
         )
     )
 
@@ -90,7 +94,7 @@ def to_rotation_matrix(q: ArrayLike) -> NDArray[np.float64]:
             [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
             [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
         ],
-        dtype=float,
+        dtype=np.float64,
     )
 
 
@@ -116,9 +120,9 @@ def rotation_vector_error(current: ArrayLike, target: ArrayLike) -> Vector:
     vector = q_error[1:]
     vector_norm = float(np.linalg.norm(vector))
     if vector_norm < 1e-12:
-        return 2.0 * vector
-    angle = 2.0 * np.arctan2(vector_norm, q_error[0])
-    return vector / vector_norm * angle
+        return np.asarray(2.0 * vector, dtype=np.float64)
+    angle = float(2.0 * np.arctan2(vector_norm, float(q_error[0])))
+    return np.asarray(vector / vector_norm * angle, dtype=np.float64)
 
 
 def error_vector(current: ArrayLike, target: ArrayLike) -> Vector:

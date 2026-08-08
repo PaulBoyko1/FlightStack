@@ -27,7 +27,7 @@ class RigidBody:
         attitude: ArrayLike | None = None,
         body_rate: ArrayLike | None = None,
     ) -> None:
-        matrix = np.asarray(inertia, dtype=float)
+        matrix = np.asarray(inertia, dtype=np.float64)
         if matrix.shape != (3, 3) or not np.all(np.isfinite(matrix)):
             raise ValueError("inertia must be a finite 3x3 matrix")
         if not np.allclose(matrix, matrix.T, rtol=1e-10, atol=1e-12):
@@ -37,18 +37,22 @@ class RigidBody:
         self.inertia: Matrix = matrix
         self.state = RigidBodyState(
             normalize([1.0, 0.0, 0.0, 0.0] if attitude is None else attitude),
-            np.asarray(np.zeros(3) if body_rate is None else body_rate, dtype=float),
+            np.asarray(
+                np.zeros(3) if body_rate is None else body_rate,
+                dtype=np.float64,
+            ),
         )
         if self.state.body_rate.shape != (3,) or not np.all(np.isfinite(self.state.body_rate)):
             raise ValueError("body_rate must be a finite 3-vector")
 
     def angular_acceleration(self, torque_body: ArrayLike) -> Vector:
-        torque = np.asarray(torque_body, dtype=float)
+        torque = np.asarray(torque_body, dtype=np.float64)
         if torque.shape != (3,) or not np.all(np.isfinite(torque)):
             raise ValueError("torque_body must be a finite 3-vector")
         omega = self.state.body_rate
         gyroscopic = np.cross(omega, self.inertia @ omega)
-        return np.linalg.solve(self.inertia, torque - gyroscopic)
+        acceleration = np.linalg.solve(self.inertia, torque - gyroscopic)
+        return np.asarray(acceleration, dtype=np.float64)
 
     def step(self, torque_body: ArrayLike, dt: float) -> RigidBodyState:
         if dt <= 0.0 or not np.isfinite(dt):
@@ -63,4 +67,4 @@ class RigidBody:
         return float(0.5 * omega @ self.inertia @ omega)
 
     def angular_momentum_body(self) -> Vector:
-        return self.inertia @ self.state.body_rate
+        return np.asarray(self.inertia @ self.state.body_rate, dtype=np.float64)
