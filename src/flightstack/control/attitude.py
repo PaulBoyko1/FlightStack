@@ -48,7 +48,8 @@ class AttitudeController:
 
     def desired_body_rate(self, current_q: ArrayLike, target_q: ArrayLike) -> Vector:
         rate = self.attitude_kp * rotation_vector_error(current_q, target_q)
-        return np.asarray(np.clip(rate, -self.max_rate_rad_s, self.max_rate_rad_s), dtype=np.float64)
+        limited_rate = np.clip(rate, -self.max_rate_rad_s, self.max_rate_rad_s)
+        return np.asarray(limited_rate, dtype=np.float64)
 
     def update(
         self,
