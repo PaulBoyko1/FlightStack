@@ -123,6 +123,23 @@ def rotate_inverse(q: ArrayLike, vector_world: ArrayLike) -> Vector:
     return to_rotation_matrix(q).T @ _vec(vector_world, 3, "vector_world")
 
 
+def wxyz_to_xyzw(q_wxyz: ArrayLike) -> Vector:
+    """Adapt FlightStack's scalar-first quaternion for scalar-last APIs.
+
+    This is intentionally a named boundary rather than a convenience scattered
+    through render, ML, or third-party integration code.  Both representations
+    retain the same body-to-world rotation semantics.
+    """
+    w, x, y, z = _vec(q_wxyz, 4, "q_wxyz")
+    return np.array([x, y, z, w], dtype=np.float64)
+
+
+def xyzw_to_wxyz(q_xyzw: ArrayLike) -> Vector:
+    """Adapt a scalar-last body-to-world quaternion into FlightStack form."""
+    x, y, z, w = _vec(q_xyzw, 4, "q_xyzw")
+    return np.array([w, x, y, z], dtype=np.float64)
+
+
 def relative_body_error(current: ArrayLike, target: ArrayLike) -> Vector:
     """Return shortest-path current->target relative quaternion expressed in body frame."""
     q_error = normalize(multiply(conjugate(normalize(current)), normalize(target)))

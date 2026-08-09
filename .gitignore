@@ -13,3 +13,8 @@ telemetry/
 .vscode/
 .idea/
 .DS_Store
+node_modules/
+web/dist/
+artifacts/
+models/*.zip
+models/*.pt
