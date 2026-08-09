@@ -19,11 +19,21 @@ def _vec(value: ArrayLike, size: int, name: str) -> Vector:
     return out
 
 
+def _finite_scalar(value: float, name: str) -> float:
+    try:
+        scalar = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite") from exc
+    if not np.isfinite(scalar):
+        raise ValueError(f"{name} must be finite")
+    return scalar
+
+
 def normalize(q: ArrayLike) -> Vector:
     quat = _vec(q, 4, "quaternion")
     norm = float(np.linalg.norm(quat))
-    if norm < 1e-12:
-        raise ValueError("quaternion norm is zero")
+    if not np.isfinite(norm) or norm < 1e-12:
+        raise ValueError("quaternion norm is zero or non-finite")
     return quat / norm
 
 
@@ -35,7 +45,7 @@ def conjugate(q: ArrayLike) -> Vector:
 def multiply(lhs: ArrayLike, rhs: ArrayLike) -> Vector:
     w1, x1, y1, z1 = _vec(lhs, 4, "lhs")
     w2, x2, y2, z2 = _vec(rhs, 4, "rhs")
-    return np.array(
+    result = np.array(
         [
             w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
             w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
@@ -44,16 +54,20 @@ def multiply(lhs: ArrayLike, rhs: ArrayLike) -> Vector:
         ],
         dtype=np.float64,
     )
+    if not np.all(np.isfinite(result)):
+        raise ValueError("quaternion product must be finite")
+    return result
 
 
 def from_axis_angle(axis: ArrayLike, angle_rad: float) -> Vector:
     axis_vec = _vec(axis, 3, "axis")
+    angle = _finite_scalar(angle_rad, "angle_rad")
     axis_norm = float(np.linalg.norm(axis_vec))
     if axis_norm < 1e-12:
-        if abs(angle_rad) < 1e-12:
+        if abs(angle) < 1e-12:
             return np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
         raise ValueError("nonzero rotation requires a nonzero axis")
-    half = 0.5 * float(angle_rad)
+    half = 0.5 * angle
     result = np.concatenate(
         ([np.cos(half)], axis_vec / axis_norm * np.sin(half))
     )
@@ -70,9 +84,12 @@ def from_rotation_vector(rotation: ArrayLike) -> Vector:
 
 def from_euler(roll: float, pitch: float, yaw: float) -> Vector:
     """Create body-to-world quaternion from intrinsic XYZ / roll-pitch-yaw angles."""
-    cr, sr = np.cos(roll / 2.0), np.sin(roll / 2.0)
-    cp, sp = np.cos(pitch / 2.0), np.sin(pitch / 2.0)
-    cy, sy = np.cos(yaw / 2.0), np.sin(yaw / 2.0)
+    roll_value = _finite_scalar(roll, "roll")
+    pitch_value = _finite_scalar(pitch, "pitch")
+    yaw_value = _finite_scalar(yaw, "yaw")
+    cr, sr = np.cos(roll_value / 2.0), np.sin(roll_value / 2.0)
+    cp, sp = np.cos(pitch_value / 2.0), np.sin(pitch_value / 2.0)
+    cy, sy = np.cos(yaw_value / 2.0), np.sin(yaw_value / 2.0)
     return normalize(
         np.array(
             [
@@ -138,8 +155,9 @@ def geodesic_angle(current: ArrayLike, target: ArrayLike) -> float:
 
 def integrate_body_rate(q: ArrayLike, omega_body: ArrayLike, dt: float) -> Vector:
     """Integrate constant body rate exactly over dt using the quaternion exponential."""
-    if not np.isfinite(dt) or dt <= 0.0:
+    step = _finite_scalar(dt, "dt")
+    if step <= 0.0:
         raise ValueError("dt must be positive and finite")
     omega = _vec(omega_body, 3, "omega_body")
-    delta = from_rotation_vector(omega * dt)
+    delta = from_rotation_vector(omega * step)
     return normalize(multiply(normalize(q), delta))
