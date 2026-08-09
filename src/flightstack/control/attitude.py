@@ -11,6 +11,24 @@ from flightstack.math.quaternion import rotation_vector_error
 Vector = NDArray[np.float64]
 
 
+def _gain(value: ArrayLike, name: str) -> Vector:
+    gain = np.asarray(value, dtype=np.float64)
+    if gain.shape != (3,) or not np.all(np.isfinite(gain)):
+        raise ValueError(f"{name} must be a finite 3-vector")
+    if np.any(gain < 0.0):
+        raise ValueError(f"{name} must be nonnegative")
+    return gain
+
+
+def _rate_limit(value: ArrayLike | float) -> Vector:
+    limit = np.asarray(value, dtype=np.float64)
+    if limit.ndim == 0:
+        limit = np.full(3, float(limit), dtype=np.float64)
+    if limit.shape != (3,) or not np.all(np.isfinite(limit)) or np.any(limit <= 0.0):
+        raise ValueError("max_rate_rad_s must be positive and finite")
+    return limit
+
+
 class AttitudeController:
     """Quaternion P outer loop feeding a rate PID inner loop."""
 
@@ -21,15 +39,8 @@ class AttitudeController:
         rate_pid: VectorPID,
         max_rate_rad_s: ArrayLike | float,
     ) -> None:
-        self.attitude_kp = np.asarray(attitude_kp, dtype=float)
-        if self.attitude_kp.shape != (3,) or np.any(self.attitude_kp < 0.0):
-            raise ValueError("attitude_kp must be a nonnegative 3-vector")
-        max_rate = np.asarray(max_rate_rad_s, dtype=float)
-        if max_rate.ndim == 0:
-            max_rate = np.full(3, float(max_rate))
-        if max_rate.shape != (3,) or np.any(max_rate <= 0.0):
-            raise ValueError("max_rate_rad_s must be positive")
-        self.max_rate_rad_s = max_rate
+        self.attitude_kp = _gain(attitude_kp, "attitude_kp")
+        self.max_rate_rad_s = _rate_limit(max_rate_rad_s)
         self.rate_pid = rate_pid
 
     def reset(self) -> None:
@@ -37,7 +48,7 @@ class AttitudeController:
 
     def desired_body_rate(self, current_q: ArrayLike, target_q: ArrayLike) -> Vector:
         rate = self.attitude_kp * rotation_vector_error(current_q, target_q)
-        return np.clip(rate, -self.max_rate_rad_s, self.max_rate_rad_s)
+        return np.asarray(np.clip(rate, -self.max_rate_rad_s, self.max_rate_rad_s), dtype=np.float64)
 
     def update(
         self,
