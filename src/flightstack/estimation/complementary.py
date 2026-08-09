@@ -32,12 +32,14 @@ class ComplementaryAttitudeEstimator:
         self.attitude = normalize(attitude_q)
 
     def update(self, gyro_rad_s: ArrayLike, accel_m_s2: ArrayLike, dt: float) -> Vector:
-        gyro = np.asarray(gyro_rad_s, dtype=float)
-        accel = np.asarray(accel_m_s2, dtype=float)
+        gyro = np.asarray(gyro_rad_s, dtype=np.float64)
+        accel = np.asarray(accel_m_s2, dtype=np.float64)
         if gyro.shape != (3,) or accel.shape != (3,):
             raise ValueError("gyro and accel must be 3-vectors")
+        if not np.all(np.isfinite(gyro)) or not np.all(np.isfinite(accel)):
+            raise ValueError("gyro and accel must be finite")
         accel_norm = float(np.linalg.norm(accel))
-        correction = np.zeros(3)
+        correction = np.zeros(3, dtype=np.float64)
         if accel_norm > 1e-6:
             measured_up_body = accel / accel_norm
             predicted_up_body = rotate_inverse(self.attitude, [0.0, 0.0, 1.0])
