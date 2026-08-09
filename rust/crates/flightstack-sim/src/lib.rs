@@ -560,11 +560,16 @@ impl Multirotor {
         dt_s: f64,
         disturbance: Disturbance,
     ) -> Result<(FlightState, MixerResult, PidTerms), SimError> {
-        let terms = controller.update(command, self.state.body_rate_rad_s, dt_s)?;
+        // Stage PID state so a rejected disturbance, allocation, or plant
+        // step can be corrected and retried without consuming controller
+        // history.
+        let mut staged_controller = controller.clone();
+        let terms = staged_controller.update(command, self.state.body_rate_rad_s, dt_s)?;
         let mixed = self
             .mixer
             .mix(command.collective_thrust_n, terms.output_torque_nm)?;
         let state = self.step_motor_targets(mixed.motor_target_thrust_n, dt_s, disturbance)?;
+        *controller = staged_controller;
         Ok((state, mixed, terms))
     }
 }
@@ -623,8 +628,9 @@ impl FixedStepRuntime {
 
     /// Reset plant and controller history together.
     pub fn reset(&mut self, state: FlightState) -> Result<FlightState, SimError> {
+        let reset_state = self.vehicle.reset(state)?;
         self.controller.reset();
-        self.vehicle.reset(state)
+        Ok(reset_state)
     }
 
     /// Execute one nominal calm CTBR step.
@@ -946,6 +952,19 @@ mod tests {
     fn mixer_uses_geometry_and_exposes_saturation() {
         let vehicle_config = config();
         let mixer = QuadMixer::new(&vehicle_config).expect("valid configured mixer");
+        for requested_wrench in [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ] {
+            let motor_thrust = matrix_vector_product_4(mixer.allocation_inverse, requested_wrench);
+            let reconstructed = matrix_vector_product_4(mixer.allocation, motor_thrust);
+            for (actual, expected) in reconstructed.iter().zip(requested_wrench) {
+                assert_close(*actual, expected);
+            }
+        }
+
         let equal = mixer
             .mix(vehicle_config.hover_thrust_n(), [0.0; 3])
             .expect("hover allocation");
@@ -958,19 +977,31 @@ mod tests {
         let roll = mixer
             .mix(vehicle_config.hover_thrust_n(), [0.03, 0.0, 0.0])
             .expect("roll allocation");
-        assert!(roll.achieved_torque_body_nm[0] > 0.0);
+        assert_close(
+            roll.achieved_collective_thrust_n,
+            vehicle_config.hover_thrust_n(),
+        );
+        assert_vec_close(roll.achieved_torque_body_nm, [0.03, 0.0, 0.0]);
         assert!(roll.motor_target_thrust_n[0] > roll.motor_target_thrust_n[2]);
 
         let pitch = mixer
             .mix(vehicle_config.hover_thrust_n(), [0.0, 0.03, 0.0])
             .expect("pitch allocation");
-        assert!(pitch.achieved_torque_body_nm[1] > 0.0);
+        assert_close(
+            pitch.achieved_collective_thrust_n,
+            vehicle_config.hover_thrust_n(),
+        );
+        assert_vec_close(pitch.achieved_torque_body_nm, [0.0, 0.03, 0.0]);
         assert!(pitch.motor_target_thrust_n[1] > pitch.motor_target_thrust_n[0]);
 
         let yaw = mixer
             .mix(vehicle_config.hover_thrust_n(), [0.0, 0.0, 0.03])
             .expect("yaw allocation");
-        assert!(yaw.achieved_torque_body_nm[2] > 0.0);
+        assert_close(
+            yaw.achieved_collective_thrust_n,
+            vehicle_config.hover_thrust_n(),
+        );
+        assert_vec_close(yaw.achieved_torque_body_nm, [0.0, 0.0, 0.03]);
         assert!(yaw.motor_target_thrust_n[0] > yaw.motor_target_thrust_n[1]);
 
         let saturated = mixer
@@ -1016,6 +1047,39 @@ mod tests {
             .expect("hover step");
         assert_vec_close(after.velocity_world_m_s, before.velocity_world_m_s);
         assert_vec_close(after.body_rate_rad_s, [0.0; 3]);
+    }
+
+    #[test]
+    fn non_identity_attitude_rotates_thrust_into_world_frame() {
+        let vehicle_config = config();
+        let q_body_to_world_wxyz = flightstack_core::quaternion::from_axis_angle(
+            [1.0, 0.0, 0.0],
+            std::f64::consts::FRAC_PI_2,
+        )
+        .expect("valid quarter turn");
+        let state = FlightState::new(
+            0.0,
+            [0.0; 3],
+            [0.0; 3],
+            q_body_to_world_wxyz,
+            [0.0; 3],
+            [vehicle_config.hover_thrust_n() / 4.0; 4],
+        )
+        .expect("tilted state");
+        let mut vehicle =
+            Multirotor::from_state(vehicle_config.clone(), state).expect("tilted vehicle");
+        let dt_s = 0.01;
+        let after = vehicle
+            .step_motor_targets_calm([vehicle_config.hover_thrust_n() / 4.0; 4], dt_s)
+            .expect("tilted step");
+        assert_vec_close(
+            after.velocity_world_m_s,
+            [
+                0.0,
+                -vehicle_config.gravity_m_s2 * dt_s,
+                -vehicle_config.gravity_m_s2 * dt_s,
+            ],
+        );
     }
 
     #[test]
@@ -1094,6 +1158,85 @@ mod tests {
             runtime.step_calm(hover).expect("rate-control step");
         }
         assert!(vector_norm(runtime.state().body_rate_rad_s) < initial_norm * 0.2);
+    }
+
+    #[test]
+    fn controller_saturation_prevents_integral_windup() {
+        let vehicle_config = config();
+        let mut controller = BodyRateController::new(&vehicle_config).expect("controller");
+        let command = PilotCommand::new(vehicle_config.hover_thrust_n(), [100.0, 0.0, 0.0])
+            .expect("finite command");
+        let mut terms = controller
+            .update(command, [0.0; 3], 0.002)
+            .expect("saturated update");
+        for _ in 0..100 {
+            terms = controller
+                .update(command, [0.0; 3], 0.002)
+                .expect("saturated update");
+        }
+        assert_close(
+            terms.output_torque_nm[0],
+            vehicle_config.control.rate_torque_limit_nm[0],
+        );
+        assert_vec_close(terms.integral_nm, [0.0; 3]);
+    }
+
+    #[test]
+    fn rejected_ctbr_step_preserves_controller_history_for_retry() {
+        let vehicle_config = config();
+        let initial_state = FlightState::hovering(&vehicle_config, 1.0).expect("hover state");
+        let command =
+            PilotCommand::new(vehicle_config.hover_thrust_n(), [0.4, -0.25, 0.1]).expect("command");
+
+        let mut expected_vehicle =
+            Multirotor::from_state(vehicle_config.clone(), initial_state).expect("vehicle");
+        let mut expected_controller = BodyRateController::new(&vehicle_config).expect("controller");
+        let expected = expected_vehicle
+            .step_command(
+                command,
+                &mut expected_controller,
+                0.002,
+                Disturbance::calm(),
+            )
+            .expect("baseline step");
+
+        let mut retried_vehicle =
+            Multirotor::from_state(vehicle_config.clone(), initial_state).expect("vehicle");
+        let mut retried_controller = BodyRateController::new(&vehicle_config).expect("controller");
+        assert!(retried_vehicle
+            .step_command(
+                command,
+                &mut retried_controller,
+                0.002,
+                Disturbance {
+                    motor_efficiency: [1.0, 1.1, 1.0, 1.0],
+                    ..Disturbance::calm()
+                },
+            )
+            .is_err());
+        assert_eq!(retried_vehicle.state(), initial_state);
+        let retried = retried_vehicle
+            .step_command(command, &mut retried_controller, 0.002, Disturbance::calm())
+            .expect("retried step");
+        assert_eq!(retried, expected);
+    }
+
+    #[test]
+    fn rejected_runtime_reset_preserves_controller_history() {
+        let vehicle_config = config();
+        let command =
+            PilotCommand::new(vehicle_config.hover_thrust_n(), [0.4, -0.25, 0.1]).expect("command");
+        let mut baseline =
+            FixedStepRuntime::new(vehicle_config.clone(), 0.002).expect("baseline runtime");
+        baseline.step_calm(command).expect("first step");
+        let mut retried = baseline.clone();
+        let mut invalid_state = retried.state();
+        invalid_state.q_body_to_world_wxyz = [0.0; 4];
+        assert!(retried.reset(invalid_state).is_err());
+
+        let expected = baseline.step_calm(command).expect("baseline retry");
+        let actual = retried.step_calm(command).expect("preserved retry");
+        assert_eq!(actual, expected);
     }
 
     #[test]

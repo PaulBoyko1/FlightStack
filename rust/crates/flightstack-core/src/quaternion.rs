@@ -19,38 +19,68 @@ pub fn xyzw_to_wxyz(q_xyzw: QuatWxyz) -> QuatWxyz {
 
 /// Euclidean norm of a finite scalar-first quaternion.
 pub fn norm(q: QuatWxyz) -> Result<f64, ContractError> {
-    if !q.iter().all(|value| value.is_finite()) {
-        return Err(ContractError::new(
-            "quaternion must contain only finite values",
-        ));
+    ensure_finite_quaternion(q)?;
+    let scale = q.iter().map(|value| value.abs()).fold(0.0_f64, f64::max);
+    if scale == 0.0 {
+        return Ok(0.0);
     }
-    Ok(q.iter().map(|value| value * value).sum::<f64>().sqrt())
+    let scaled_norm = q
+        .iter()
+        .map(|value| {
+            let scaled = value / scale;
+            scaled * scaled
+        })
+        .sum::<f64>()
+        .sqrt();
+    let magnitude = scale * scaled_norm;
+    if magnitude.is_finite() {
+        Ok(magnitude)
+    } else {
+        Err(ContractError::new(
+            "quaternion norm is too large to represent as f64",
+        ))
+    }
 }
 
 /// Normalize a scalar-first quaternion, rejecting zero/non-finite input.
 pub fn normalize(q: QuatWxyz) -> Result<QuatWxyz, ContractError> {
-    let magnitude = norm(q)?;
-    if magnitude < MIN_QUATERNION_NORM {
+    ensure_finite_quaternion(q)?;
+    // Scale before squaring so finite inputs close to `f64::MAX` do not
+    // overflow. The normalized result remains representable even if the input
+    // norm itself would be larger than an `f64` can express.
+    let scale = q.iter().map(|value| value.abs()).fold(0.0_f64, f64::max);
+    if scale < MIN_QUATERNION_NORM {
         return Err(ContractError::new("quaternion norm is zero or too small"));
     }
+    let scaled_norm = q
+        .iter()
+        .map(|value| {
+            let scaled = value / scale;
+            scaled * scaled
+        })
+        .sum::<f64>()
+        .sqrt();
+    if !scaled_norm.is_finite() || scaled_norm < MIN_QUATERNION_NORM {
+        return Err(ContractError::new("quaternion norm is zero or non-finite"));
+    }
     Ok([
-        q[0] / magnitude,
-        q[1] / magnitude,
-        q[2] / magnitude,
-        q[3] / magnitude,
+        (q[0] / scale) / scaled_norm,
+        (q[1] / scale) / scaled_norm,
+        (q[2] / scale) / scaled_norm,
+        (q[3] / scale) / scaled_norm,
     ])
 }
 
 /// Return the conjugate of a scalar-first quaternion.
 pub fn conjugate(q: QuatWxyz) -> Result<QuatWxyz, ContractError> {
-    let _ = norm(q)?;
+    ensure_finite_quaternion(q)?;
     Ok([q[0], -q[1], -q[2], -q[3]])
 }
 
 /// Hamilton product of two scalar-first quaternions.
 pub fn multiply(lhs: QuatWxyz, rhs: QuatWxyz) -> Result<QuatWxyz, ContractError> {
-    let _ = norm(lhs)?;
-    let _ = norm(rhs)?;
+    ensure_finite_quaternion(lhs)?;
+    ensure_finite_quaternion(rhs)?;
     let product = [
         lhs[0] * rhs[0] - lhs[1] * rhs[1] - lhs[2] * rhs[2] - lhs[3] * rhs[3],
         lhs[0] * rhs[1] + lhs[1] * rhs[0] + lhs[2] * rhs[3] - lhs[3] * rhs[2],
@@ -190,6 +220,16 @@ fn vector_norm(vector: Vec3) -> f64 {
     (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt()
 }
 
+fn ensure_finite_quaternion(q: QuatWxyz) -> Result<(), ContractError> {
+    if q.iter().all(|value| value.is_finite()) {
+        Ok(())
+    } else {
+        Err(ContractError::new(
+            "quaternion must contain only finite values",
+        ))
+    }
+}
+
 fn matrix_vector_product(matrix: [[f64; 3]; 3], vector: Vec3) -> Vec3 {
     [
         matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
@@ -239,6 +279,15 @@ mod tests {
         );
         let negative = quaternion.map(|value| -value);
         assert_vector_close(&xyzw_to_wxyz(wxyz_to_xyzw(negative)), &negative);
+    }
+
+    #[test]
+    fn normalization_handles_huge_finite_components_without_overflow() {
+        let huge = [f64::MAX, -f64::MAX, f64::MAX, -f64::MAX];
+        let normalized = normalize(huge).expect("finite quaternion is normalizable");
+        assert_vector_close(&normalized, &[0.5, -0.5, 0.5, -0.5]);
+        assert_vector_close(&[norm(normalized).expect("unit norm")], &[1.0]);
+        assert!(norm(huge).is_err(), "unrepresentable norm is rejected");
     }
 
     #[test]
