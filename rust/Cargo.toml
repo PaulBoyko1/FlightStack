@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "crates/flightstack-core",
+    "crates/flightstack-sim",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+authors = ["Paul Boyko"]
+description = "FlightStack deterministic runtime primitives"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
