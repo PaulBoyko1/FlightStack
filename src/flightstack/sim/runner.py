@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from flightstack.control.attitude import AttitudeController
-from flightstack.math.quaternion import geodesic_angle
+from flightstack.math.quaternion import geodesic_angle, normalize
 from flightstack.sim.rigid_body import RigidBody
 
 Vector = NDArray[np.float64]
@@ -41,24 +41,34 @@ def simulate_attitude_step(
     duration_s: float = 4.0,
     dt: float = 0.002,
 ) -> Telemetry:
-    if duration_s <= 0.0 or dt <= 0.0:
-        raise ValueError("duration_s and dt must be positive")
-    target = np.asarray(target_q, dtype=float)
-    steps = int(round(duration_s / dt))
+    try:
+        duration = float(duration_s)
+        step_s = float(dt)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("duration_s and dt must be positive and finite") from exc
+    if (
+        not np.isfinite(duration)
+        or not np.isfinite(step_s)
+        or duration <= 0.0
+        or step_s <= 0.0
+    ):
+        raise ValueError("duration_s and dt must be positive and finite")
+    target = normalize(target_q)
+    steps = int(round(duration / step_s))
     if steps < 1:
         raise ValueError("duration must include at least one simulation step")
 
-    time_s = np.arange(steps + 1, dtype=float) * dt
-    attitude = np.empty((steps + 1, 4))
-    body_rate = np.empty((steps + 1, 3))
-    desired_rate = np.empty((steps + 1, 3))
-    torque = np.empty((steps + 1, 3))
-    error = np.empty(steps + 1)
+    time_s = np.arange(steps + 1, dtype=np.float64) * step_s
+    attitude = np.empty((steps + 1, 4), dtype=np.float64)
+    body_rate = np.empty((steps + 1, 3), dtype=np.float64)
+    desired_rate = np.empty((steps + 1, 3), dtype=np.float64)
+    torque = np.empty((steps + 1, 3), dtype=np.float64)
+    error = np.empty(steps + 1, dtype=np.float64)
 
     attitude[0] = plant.state.attitude
     body_rate[0] = plant.state.body_rate
     desired_rate[0] = controller.desired_body_rate(plant.state.attitude, target)
-    torque[0] = np.zeros(3)
+    torque[0] = np.zeros(3, dtype=np.float64)
     error[0] = geodesic_angle(plant.state.attitude, target)
 
     controller.reset()
@@ -67,9 +77,9 @@ def simulate_attitude_step(
             plant.state.attitude,
             target,
             plant.state.body_rate,
-            dt,
+            step_s,
         )
-        state = plant.step(terms.output, dt)
+        state = plant.step(terms.output, step_s)
         attitude[index] = state.attitude
         body_rate[index] = state.body_rate
         desired_rate[index] = desired
