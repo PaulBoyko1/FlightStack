@@ -115,6 +115,70 @@ def to_rotation_matrix(q: ArrayLike) -> NDArray[np.float64]:
     )
 
 
+def from_rotation_matrix(matrix: ArrayLike) -> Vector:
+    """Create a canonical scalar-first quaternion from a proper 3D rotation.
+
+    The input matrix is interpreted as body-to-world.  It is validated instead
+    of silently projecting an arbitrary matrix onto SO(3), so a caller cannot
+    accidentally hide a frame or numerical-contract error in the autonomy
+    layer.
+    """
+    rotation = np.asarray(matrix, dtype=np.float64)
+    if rotation.shape != (3, 3) or not np.all(np.isfinite(rotation)):
+        raise ValueError("rotation matrix must be a finite 3x3 matrix")
+    if not np.allclose(rotation.T @ rotation, np.eye(3), rtol=1e-9, atol=1e-10):
+        raise ValueError("rotation matrix must be orthonormal")
+    if not np.isclose(np.linalg.det(rotation), 1.0, rtol=1e-9, atol=1e-10):
+        raise ValueError("rotation matrix must have determinant +1")
+
+    trace = float(np.trace(rotation))
+    if trace > 0.0:
+        scale = 2.0 * np.sqrt(trace + 1.0)
+        quaternion = np.array(
+            [
+                0.25 * scale,
+                (rotation[2, 1] - rotation[1, 2]) / scale,
+                (rotation[0, 2] - rotation[2, 0]) / scale,
+                (rotation[1, 0] - rotation[0, 1]) / scale,
+            ],
+            dtype=np.float64,
+        )
+    elif rotation[0, 0] > rotation[1, 1] and rotation[0, 0] > rotation[2, 2]:
+        scale = 2.0 * np.sqrt(1.0 + rotation[0, 0] - rotation[1, 1] - rotation[2, 2])
+        quaternion = np.array(
+            [
+                (rotation[2, 1] - rotation[1, 2]) / scale,
+                0.25 * scale,
+                (rotation[0, 1] + rotation[1, 0]) / scale,
+                (rotation[0, 2] + rotation[2, 0]) / scale,
+            ],
+            dtype=np.float64,
+        )
+    elif rotation[1, 1] > rotation[2, 2]:
+        scale = 2.0 * np.sqrt(1.0 + rotation[1, 1] - rotation[0, 0] - rotation[2, 2])
+        quaternion = np.array(
+            [
+                (rotation[0, 2] - rotation[2, 0]) / scale,
+                (rotation[0, 1] + rotation[1, 0]) / scale,
+                0.25 * scale,
+                (rotation[1, 2] + rotation[2, 1]) / scale,
+            ],
+            dtype=np.float64,
+        )
+    else:
+        scale = 2.0 * np.sqrt(1.0 + rotation[2, 2] - rotation[0, 0] - rotation[1, 1])
+        quaternion = np.array(
+            [
+                (rotation[1, 0] - rotation[0, 1]) / scale,
+                (rotation[0, 2] + rotation[2, 0]) / scale,
+                (rotation[1, 2] + rotation[2, 1]) / scale,
+                0.25 * scale,
+            ],
+            dtype=np.float64,
+        )
+    return normalize(quaternion)
+
+
 def rotate(q: ArrayLike, vector_body: ArrayLike) -> Vector:
     return to_rotation_matrix(q) @ _vec(vector_body, 3, "vector_body")
 
