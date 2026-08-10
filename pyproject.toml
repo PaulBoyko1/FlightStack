@@ -26,6 +26,10 @@ dev = [
   "pytest-cov>=5.0",
   "ruff>=0.6",
 ]
+train = [
+  "gymnasium>=0.29",
+  "stable-baselines3>=2.3",
+]
 
 [project.scripts]
 flightstack = "flightstack.cli:main"
