@@ -1,0 +1,18 @@
+# Reproducible robustness seed for paired controller comparisons.
+# The finite duration and 2 ms tick keep each headless run bounded.
+name = "technical-eight-wind-degraded"
+seed = 42
+track = "technical-eight"
+laps = 1
+duration_s = 20.0
+physics_dt_s = 0.002
+telemetry_period_s = 0.05
+vehicle_radius_m = 0.13
+
+# Steady ENU-like wind plus one seeded, per-episode realization draw.
+wind_world_m_s = [0.12, -0.08, 0.0]
+wind_jitter_std_m_s = 0.015
+
+# Mild, explicit per-motor degradation with a small deterministic tolerance.
+motor_efficiency = [0.99, 0.97, 0.98, 0.96]
+motor_efficiency_jitter = 0.003
