@@ -98,6 +98,10 @@ def test_telemetry_does_not_advance_the_learned_policy_scheduler() -> None:
     policy = FixedHoverPolicy()
     session.learned = LearnedPolicyPilot(session.config, policy)
     assert session.set_pilot("learned") is None
+    assert session.recorder is not None
+    assert [event["type"] for event in session.recorder.frames[0].to_mapping()["events"]] == [
+        "Reset"
+    ]
 
     # Broadcasting before physics advances must be observational.  A browser
     # connect/disconnect cadence cannot change autonomous behavior.
@@ -112,6 +116,9 @@ def test_telemetry_does_not_advance_the_learned_policy_scheduler() -> None:
     session.step()
     assert session.race.running
     assert policy.calls == 1
+    assert [event["type"] for event in session.recorder.frames[-1].to_mapping()["events"]] == [
+        "Start"
+    ]
     session.telemetry()
     session.telemetry()
     assert policy.calls == 1

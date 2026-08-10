@@ -142,6 +142,17 @@ by a reviewed experiment/provenance decision.  See
 [experiments.md](docs/experiments.md) for paired evaluation and robustness
 tools.
 
+Inspect a recorded replay or export its authoritative source frames for a plot:
+
+```powershell
+flightstack replay artifacts/classical-evaluation/replay.json --at 4.0 --interpolate
+flightstack replay artifacts/classical-evaluation/replay.json --csv artifacts/replay.csv
+```
+
+Replay v1 preserves sampled canonical state (including motor thrust), CTBR
+command, pilot, race snapshot, and events.  Playback interpolates only the
+continuous state; pilot/race/events remain recorded discrete data.
+
 ## Common verification commands
 
 ```powershell

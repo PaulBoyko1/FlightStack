@@ -171,6 +171,13 @@ class FlightSession:
                 "pilot": self.pilot.value,
             }
         )
+        self.recorder.record(
+            state,
+            self.pilot,
+            PilotCommand.hover(self.config),
+            race=self.race.to_mapping(),
+            events=event_mappings(events),
+        )
         return events
 
     def set_manual_input(self, payload: dict[str, Any]) -> None:

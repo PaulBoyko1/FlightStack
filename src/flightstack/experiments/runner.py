@@ -417,6 +417,17 @@ def run_episode(
     )
     recorder = ReplayRecorder({"provenance": provenance.to_mapping()})
     all_events: list[Mapping[str, object]] = [_event_mapping(event) for event in initial_events]
+    initial_mapped_events = tuple(_event_mapping(event) for event in initial_events)
+    # Preserve reset/start evidence even if the run crashes before the first
+    # scheduled telemetry sample.  A replay is an event record, not merely a
+    # downsampled plot stream.
+    recorder.record(
+        initial_state,
+        pilot.kind,
+        PilotCommand.hover(config),
+        race=race.to_mapping(),
+        events=initial_mapped_events,
+    )
     samples: list[TelemetrySample] = []
     next_telemetry_s = 0.0
     travelled_m = 0.0
@@ -425,10 +436,12 @@ def run_episode(
     max_body_rate = 0.0
     saturated_steps = 0
     crashed = False
+    last_command = PilotCommand.hover(config)
 
     for _ in range(scenario.physics_steps):
         previous = runtime.state
         command = pilot.command(previous, race, scenario.physics_dt_s)
+        last_command = command
         current, mixed, _terms = runtime.step(command, realization.disturbance)
         travelled_m += float(np.linalg.norm(current.position_world_m - previous.position_world_m))
         speed = float(np.linalg.norm(current.velocity_world_m_s))
@@ -457,7 +470,10 @@ def run_episode(
         mapped_events = tuple(_event_mapping(event) for event in new_events)
         all_events.extend(mapped_events)
 
-        if current.sim_time_s + 1e-12 >= next_telemetry_s:
+        sample_due = current.sim_time_s + 1e-12 >= next_telemetry_s
+        # Never downsample an event away: a terminal collision or finish can
+        # happen between regular telemetry frames.
+        if sample_due or mapped_events:
             race_snapshot = race.to_mapping()
             sample = TelemetrySample(current, command, race_snapshot, mapped_events)
             samples.append(sample)
@@ -468,6 +484,7 @@ def run_episode(
                 race=race_snapshot,
                 events=mapped_events,
             )
+        if sample_due:
             while next_telemetry_s <= current.sim_time_s + 1e-12:
                 next_telemetry_s += scenario.telemetry_period_s
         if crashed or race.finished:
@@ -475,7 +492,9 @@ def run_episode(
 
     final_state = runtime.state
     if not samples or samples[-1].state.sim_time_s < final_state.sim_time_s:
-        final_command = pilot.command(final_state, race, scenario.physics_dt_s)
+        # Sampling a terminal state must not advance a mutable learned-policy
+        # scheduler.  This is the last command actually applied to the plant.
+        final_command = last_command
         final_sample = TelemetrySample(final_state, final_command, race.to_mapping(), ())
         samples.append(final_sample)
         recorder.record(

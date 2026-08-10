@@ -152,10 +152,13 @@ implicit benchmark claims.
 
 `ReplayRecorder` captures authoritative fixed-step `FlightState`, pilot kind,
 CTBR command, compact race data, and event mappings as versioned JSON
-(`flightstack-replay-v1`).  Interactive recordings are session-owned and in
-memory; its Python `write()` API can persist a recording.  The headless
-experiment runner emits replay JSON alongside result and sampled-telemetry
-artifacts.  The browser has no replay download control yet.
+(`flightstack-replay-v1`).  `read_replay()` validates and reconstructs typed
+v1 frames; `ReplayPlayer` provides source-frame or continuous-state
+interpolation and CSV export through `flightstack replay`.  Interactive
+recordings are session-owned and in memory; its Python `write()` API can
+persist a recording.  The headless experiment runner emits replay JSON
+alongside result and sampled-telemetry artifacts.  The browser has no replay
+download control yet.
 
 Telemetry packets carry canonical state, motor thrust, current command, race
 status, and track geometry.  They are intended as inspection data, not a

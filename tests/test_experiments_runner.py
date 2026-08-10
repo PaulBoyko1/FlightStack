@@ -80,7 +80,19 @@ def test_headless_episode_records_canonical_race_telemetry_and_replay(tmp_path) 
     assert artifacts.telemetry_path.is_file()
     replay = load_replay(artifacts.replay_path)
     assert replay["metadata"]["provenance"]["pilot_name"] == "classical"
-    assert len(replay["frames"]) == len(result.telemetry)
+    # Replays retain an initial reset/start frame even though telemetry starts
+    # after the first physics step, and they never downsample events away.
+    assert len(replay["frames"]) == len(result.telemetry) + 1
+    replay_event_types = {
+        event["type"] for frame in replay["frames"] for event in frame["events"]
+    }
+    assert replay_event_types >= {
+        "Reset",
+        "Start",
+        "GatePassed",
+        "LapCompleted",
+        "RaceFinished",
+    }
 
 
 def test_episode_provenance_fingerprints_scenario_track_code_and_optional_model(
@@ -154,6 +166,13 @@ def test_headless_episode_uses_ground_collision_as_a_terminal_event(tmp_path) ->
     assert not result.metrics.completed
     assert result.metrics.collisions == 1
     assert any(event["type"] == "Collision" for event in result.events)
+    replay = result.write_artifacts(tmp_path / "ground-artifacts")
+    replay_events = [
+        event
+        for frame in load_replay(replay.replay_path)["frames"]
+        for event in frame["events"]
+    ]
+    assert any(event["type"] == "Collision" for event in replay_events)
 
 
 def test_collision_precedes_a_same_tick_terminal_gate_crossing(tmp_path, monkeypatch) -> None:

@@ -56,6 +56,20 @@ Callers evaluating a learned artifact can pass
 `checkpoint_model_identity(checkpoint_path)` as `pilot_model_identity` to
 record model and metadata-sidecar hashes as well.
 
+`replay.json` is a validated FlightStack replay-v1 record, not a browser-only
+capture.  It carries sampled canonical state (including motor output), CTBR
+command, pilot, race snapshot, and events.  Inspect it or export state frames
+without rerunning physics:
+
+```powershell
+flightstack replay artifacts/classical-evaluation/replay.json --at 4.0 --interpolate
+flightstack replay artifacts/classical-evaluation/replay.json --csv artifacts/replay.csv
+```
+
+Interpolation is explicitly for the continuous rendered/debug state; race,
+pilot, commands, and events remain discrete recorded values.  There is no
+claim yet of deterministic re-simulation from a telemetry-rate command stream.
+
 `artifacts/` is ignored by Git.  Preserve a reviewed artifact set outside a
 discardable worktree or attach it to a documented experiment release; no result
 is made reproducible merely by pasting a console summary into documentation.
