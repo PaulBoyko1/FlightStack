@@ -21,6 +21,8 @@ name = "flightstack-sim"
 version = "0.1.0"
 dependencies = [
  "flightstack-core",
+ "serde",
+ "toml",
 ]
 
 [[package]]

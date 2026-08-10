@@ -9,3 +9,7 @@ description = "Deterministic FlightStack 6DOF reference multirotor simulator"
 
 [dependencies]
 flightstack-core = { path = "../flightstack-core" }
+
+[dev-dependencies]
+serde.workspace = true
+toml.workspace = true
