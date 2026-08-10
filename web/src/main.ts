@@ -286,7 +286,10 @@ let currentState: StateWire = {
 let technicalMode = false;
 let activePilot: "human" | "classical" | "learned" = "human";
 
-const input = { roll: 0, pitch: 0, yaw: 0, throttle: 0 };
+const KEYBOARD_ROLL_PITCH = 0.42;
+const KEYBOARD_YAW = 0.34;
+const KEYBOARD_THROTTLE_RATE = 0.32;
+const input = { roll: 0, pitch: 0, yaw: 0, throttle: 0.5 };
 const pressed = new Set<string>();
 let toastTimeout = 0;
 
@@ -445,7 +448,7 @@ const connect = (): void => {
   socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
   socket.addEventListener("open", () => {
     updateConnection(true);
-    showToast("Connected to fixed-step FlightStack runtime");
+    showToast("Manual flight ready — WASD to move, Space/Shift for throttle");
     send({ type: "set_pilot", pilot: activePilot });
   });
   socket.addEventListener("message", (event) => {
@@ -463,31 +466,32 @@ const connect = (): void => {
 
 const updateInput = (elapsedSeconds: number): void => {
   const target = {
-    roll: (pressed.has("KeyD") ? 1 : 0) - (pressed.has("KeyA") ? 1 : 0),
-    pitch: (pressed.has("KeyW") ? 1 : 0) - (pressed.has("KeyS") ? 1 : 0),
-    yaw: (pressed.has("KeyE") ? 1 : 0) - (pressed.has("KeyQ") ? 1 : 0),
+    roll: ((pressed.has("KeyD") ? 1 : 0) - (pressed.has("KeyA") ? 1 : 0)) * KEYBOARD_ROLL_PITCH,
+    pitch: ((pressed.has("KeyW") ? 1 : 0) - (pressed.has("KeyS") ? 1 : 0)) * KEYBOARD_ROLL_PITCH,
+    yaw: ((pressed.has("KeyE") ? 1 : 0) - (pressed.has("KeyQ") ? 1 : 0)) * KEYBOARD_YAW,
   };
   const gamepad = navigator.getGamepads().find((candidate) => candidate?.connected);
   if (gamepad) {
     target.roll = Math.abs(gamepad.axes[2] ?? 0) > 0.08 ? gamepad.axes[2] ?? 0 : target.roll;
     target.pitch = Math.abs(gamepad.axes[3] ?? 0) > 0.08 ? -(gamepad.axes[3] ?? 0) : target.pitch;
     target.yaw = Math.abs(gamepad.axes[0] ?? 0) > 0.08 ? gamepad.axes[0] ?? 0 : target.yaw;
-    const throttleAxis = gamepad.axes[1] ?? 1;
+    const throttleAxis = gamepad.axes[1] ?? 0;
     input.throttle = THREE.MathUtils.clamp((1 - throttleAxis) * 0.5, 0, 1);
   } else {
+    const throttleDown = pressed.has("ShiftLeft") || pressed.has("ShiftRight") || pressed.has("ControlLeft");
     input.throttle = THREE.MathUtils.clamp(
-      input.throttle + ((pressed.has("Space") ? 1 : 0) - (pressed.has("ControlLeft") ? 1 : 0)) * elapsedSeconds * 0.42,
+      input.throttle + ((pressed.has("Space") ? 1 : 0) - (throttleDown ? 1 : 0)) * elapsedSeconds * KEYBOARD_THROTTLE_RATE,
       0,
       1,
     );
   }
-  input.roll = THREE.MathUtils.damp(input.roll, target.roll, 18, elapsedSeconds);
-  input.pitch = THREE.MathUtils.damp(input.pitch, target.pitch, 18, elapsedSeconds);
-  input.yaw = THREE.MathUtils.damp(input.yaw, target.yaw, 18, elapsedSeconds);
+  input.roll = THREE.MathUtils.damp(input.roll, target.roll, 14, elapsedSeconds);
+  input.pitch = THREE.MathUtils.damp(input.pitch, target.pitch, 14, elapsedSeconds);
+  input.yaw = THREE.MathUtils.damp(input.yaw, target.yaw, 14, elapsedSeconds);
 };
 
 window.addEventListener("keydown", (event) => {
-  if (["Space", "ControlLeft", "KeyW", "KeyS", "KeyA", "KeyD", "KeyQ", "KeyE"].includes(event.code)) {
+  if (["Space", "ShiftLeft", "ShiftRight", "ControlLeft", "KeyW", "KeyS", "KeyA", "KeyD", "KeyQ", "KeyE"].includes(event.code)) {
     event.preventDefault();
     pressed.add(event.code);
   }
