@@ -7,7 +7,7 @@ import hashlib
 import importlib
 import json
 import platform
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -93,6 +93,25 @@ def _require_train_dependencies() -> tuple[Any, Any]:
     return sb3, vec_env
 
 
+def _make_vector_environment(
+    vec_env: Any,
+    factories: Sequence[Callable[[], Any]],
+) -> Any:
+    """Select serial or process-parallel SB3 vectorisation by environment count.
+
+    A single environment keeps the low-overhead DummyVecEnv path used by smoke
+    tests. Multiple environments use SubprocVecEnv so computationally expensive
+    FlightStack physics can occupy more than one CPU core. Stable-Baselines3
+    selects a platform-safe multiprocessing start method; on Windows this is
+    spawn, while supported Unix hosts may use forkserver.
+    """
+    if not factories:
+        raise ValueError("at least one environment factory is required")
+    if len(factories) == 1:
+        return vec_env.DummyVecEnv(list(factories))
+    return vec_env.SubprocVecEnv(list(factories))
+
+
 def train_ppo(
     output_dir: str | Path,
     *,
@@ -118,18 +137,15 @@ def train_ppo(
     destination = Path(output_dir).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
 
-    def environment_factory(index: int) -> Any:
+    def environment_factory() -> Any:
         return make_gymnasium_env(
             vehicle=selected_vehicle,
             track=selected_track,
             ai_config=selected_ai,
         )
 
-    factories = [
-        (lambda index=index: environment_factory(index))
-        for index in range(selected_training.n_envs)
-    ]
-    environment = vec_env.DummyVecEnv(factories)
+    factories = [environment_factory for _ in range(selected_training.n_envs)]
+    environment = _make_vector_environment(vec_env, factories)
     ppo_class = sb3.PPO
     model = ppo_class(
         "MlpPolicy",
@@ -187,9 +203,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--timesteps", type=int, default=25_000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--n-envs",
+        type=int,
+        default=1,
+        help="parallel training environments; values above 1 use subprocess workers",
+    )
+    parser.add_argument(
         "--smoke",
         action="store_true",
-        help="run a small 256-step PPO smoke training after installing .[train]",
+        help="run a small 256-step single-environment PPO plumbing check",
     )
     return parser
 
@@ -201,12 +223,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = PPOTrainingConfig(
             total_timesteps=256,
             seed=args.seed,
+            n_envs=1,
             n_steps=64,
             batch_size=32,
             n_epochs=1,
         )
     else:
-        config = PPOTrainingConfig(total_timesteps=args.timesteps, seed=args.seed)
+        config = PPOTrainingConfig(
+            total_timesteps=args.timesteps,
+            seed=args.seed,
+            n_envs=args.n_envs,
+        )
     result = train_ppo(args.output, training=config)
     print(f"checkpoint: {result.checkpoint_path}")
     print(f"metadata: {result.metadata_path}")
