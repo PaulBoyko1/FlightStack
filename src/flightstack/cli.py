@@ -120,12 +120,17 @@ def _train(args: argparse.Namespace) -> int:
         PPOTrainingConfig(
             total_timesteps=256,
             seed=args.seed,
+            n_envs=1,
             n_steps=64,
             batch_size=32,
             n_epochs=1,
         )
         if args.smoke
-        else PPOTrainingConfig(total_timesteps=args.timesteps, seed=args.seed)
+        else PPOTrainingConfig(
+            total_timesteps=args.timesteps,
+            seed=args.seed,
+            n_envs=args.n_envs,
+        )
     )
     try:
         result = train_ppo(args.output, training=config)
@@ -199,7 +204,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     train.add_argument("--timesteps", type=int, default=25_000)
     train.add_argument("--seed", type=int, default=42)
-    train.add_argument("--smoke", action="store_true", help="run a short 256-step PPO smoke train")
+    train.add_argument(
+        "--n-envs",
+        type=int,
+        default=1,
+        help="parallel environments; values above 1 use subprocess workers",
+    )
+    train.add_argument(
+        "--smoke",
+        action="store_true",
+        help="run a short 256-step single-environment PPO smoke train",
+    )
     train.set_defaults(func=_train)
     return parser
 

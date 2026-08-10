@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -67,11 +68,74 @@ def test_evaluate_command_writes_structured_artifacts_for_a_short_track(tmp_path
 
 def test_train_and_learned_evaluation_arguments_remain_explicit(tmp_path) -> None:
     parser = build_parser()
-    train = parser.parse_args(["train", "--output", str(tmp_path / "model"), "--smoke"])
+    train = parser.parse_args(
+        ["train", "--output", str(tmp_path / "model"), "--n-envs", "6", "--smoke"]
+    )
     learned = parser.parse_args(["evaluate", "--pilot", "learned"])
 
     assert train.smoke
+    assert train.n_envs == 6
     assert learned.policy is None
+
+
+def test_train_command_forwards_parallel_environment_count(monkeypatch, tmp_path, capsys) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_train_ppo(output, *, training):
+        captured["output"] = output
+        captured["training"] = training
+        return SimpleNamespace(
+            checkpoint_path=tmp_path / "ppo_model.zip",
+            metadata_path=tmp_path / "ppo_model.metadata.json",
+            total_timesteps=training.total_timesteps,
+        )
+
+    monkeypatch.setattr(training, "train_ppo", fake_train_ppo)
+    output = tmp_path / "model"
+    args = build_parser().parse_args(
+        [
+            "train",
+            "--output",
+            str(output),
+            "--timesteps",
+            "5000",
+            "--seed",
+            "17",
+            "--n-envs",
+            "6",
+        ]
+    )
+
+    assert args.func(args) == 0
+    selected = captured["training"]
+    assert isinstance(selected, training.PPOTrainingConfig)
+    assert selected.total_timesteps == 5000
+    assert selected.seed == 17
+    assert selected.n_envs == 6
+    assert captured["output"] == output
+    assert "timesteps: 5000" in capsys.readouterr().out
+
+
+def test_train_smoke_forces_one_environment(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_train_ppo(output, *, training):
+        captured["training"] = training
+        return SimpleNamespace(
+            checkpoint_path=tmp_path / "ppo_model.zip",
+            metadata_path=tmp_path / "ppo_model.metadata.json",
+            total_timesteps=training.total_timesteps,
+        )
+
+    monkeypatch.setattr(training, "train_ppo", fake_train_ppo)
+    args = build_parser().parse_args(
+        ["train", "--output", str(tmp_path / "model"), "--n-envs", "8", "--smoke"]
+    )
+
+    assert args.func(args) == 0
+    selected = captured["training"]
+    assert isinstance(selected, training.PPOTrainingConfig)
+    assert selected.n_envs == 1
 
 
 def test_train_command_explains_the_optional_extra(monkeypatch, tmp_path, capsys) -> None:
