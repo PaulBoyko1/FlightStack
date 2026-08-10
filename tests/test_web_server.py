@@ -53,6 +53,11 @@ def test_server_health_websocket_and_command_path(tmp_path) -> None:
             session.step()
             assert session.state.sim_time_s > before
             assert session.race.running
+            # The runtime must catch up in fixed 2 ms steps even on systems
+            # whose asyncio timer wakes only every ~15 ms.
+            paced_before = session.state.sim_time_s
+            await asyncio.sleep(0.10)
+            assert session.state.sim_time_s - paced_before >= 0.05
             await socket.close()
         finally:
             await client.close()
