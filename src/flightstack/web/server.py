@@ -306,6 +306,11 @@ class FlightSession:
                 PilotKind.CLASSICAL.value,
                 *([PilotKind.LEARNED.value] if self.learned is not None else []),
             ],
+            "vehicle": {
+                "name": self.config.name,
+                "version": self.config.version,
+                "motor_max_thrust_n": self.config.motor_max_thrust_n,
+            },
             "state": state.to_mapping(),
             "motors": {"thrust_n": state.motor_thrust_n.tolist()},
             "pilot_command": {

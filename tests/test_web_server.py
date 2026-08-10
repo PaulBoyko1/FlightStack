@@ -49,6 +49,11 @@ def test_server_health_websocket_and_command_path(tmp_path) -> None:
             socket = await client.ws_connect("/ws")
             first = await socket.receive_json()
             assert first["type"] == "state"
+            assert first["vehicle"]["name"] == session.config.name
+            assert first["vehicle"]["version"] == session.config.version
+            assert first["vehicle"]["motor_max_thrust_n"] == pytest.approx(
+                session.config.motor_max_thrust_n
+            )
             np.testing.assert_allclose(
                 first["state"]["q_body_to_world_wxyz"],
                 [0.7071067811865476, 0.0, 0.0, 0.7071067811865475],

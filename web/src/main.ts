@@ -26,6 +26,11 @@ interface StateWire {
 interface StateMessage {
   type: "state";
   pilot: "human" | "classical" | "learned";
+  vehicle: {
+    name: string;
+    version: string;
+    motor_max_thrust_n: number;
+  };
   state: StateWire;
   race: {
     lap: number;
@@ -316,7 +321,10 @@ const updateTelemetry = (message: StateMessage): void => {
   const totalThrust = message.state.motor_thrust_n.reduce((sum, value) => sum + value, 0);
   dom.thrust.textContent = `${totalThrust.toFixed(1)} N`;
   document.querySelectorAll<HTMLDivElement>(".motor").forEach((motor, index) => {
-    const percentage = Math.min(100, (message.state.motor_thrust_n[index] / 14) * 100);
+    const percentage = Math.min(
+      100,
+      (message.state.motor_thrust_n[index] / message.vehicle.motor_max_thrust_n) * 100,
+    );
     const fill = motor.querySelector("span");
     if (fill) fill.style.height = `${percentage}%`;
   });
