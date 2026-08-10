@@ -13,7 +13,10 @@ authors = [{name = "Paul Boyko"}]
 # NumPy 2.5's public stubs require Python 3.12 syntax while FlightStack still
 # type-checks its supported Python 3.11 baseline.  Keep the runtime range broad
 # but prevent a fresh 3.11 CI install from receiving incompatible stubs.
-dependencies = ["numpy>=1.26,<2.5"]
+dependencies = [
+  "aiohttp>=3.10",
+  "numpy>=1.26,<2.5",
+]
 
 [project.optional-dependencies]
 dev = [

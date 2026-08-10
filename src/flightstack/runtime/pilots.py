@@ -25,7 +25,9 @@ class PilotKind(StrEnum):
 class RaceView(Protocol):
     """Minimal race information pilots may consume without owning race state."""
 
-    next_gate_index: int
+    @property
+    def next_gate_index(self) -> int | None:
+        """Return the next physical gate, or ``None`` while the run is idle."""
 
 
 class Pilot(Protocol):

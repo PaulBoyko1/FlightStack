@@ -45,6 +45,13 @@ def _simulate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _serve(args: argparse.Namespace) -> int:
+    from flightstack.web.server import run
+
+    run(host=args.host, port=args.port)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="flightstack")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -53,6 +60,10 @@ def build_parser() -> argparse.ArgumentParser:
     sim.add_argument("--dt", type=float, default=0.002)
     sim.add_argument("--csv", type=str)
     sim.set_defaults(func=_simulate)
+    serve = subparsers.add_parser("serve", help="run the authoritative interactive simulator")
+    serve.add_argument("--host", type=str, default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.set_defaults(func=_serve)
     return parser
 
 

@@ -30,11 +30,15 @@ def _unit(value: Vector, fallback: Vector) -> Vector:
 class ClassicalPilotConfig:
     """Conservative guidance gains for the reference technical-eight course."""
 
-    cruise_speed_m_s: float = 4.5
-    position_gain_s2: float = 1.4
-    velocity_gain_s: float = 2.1
-    max_acceleration_m_s2: float = 7.0
-    max_tilt_rad: float = float(np.deg2rad(38.0))
+    # These deliberately prioritize reliable aperture clearance over lap time.
+    # Faster values are useful as experiments, but the shipped deterministic
+    # baseline must complete the course through the same collision model that
+    # judges human and learned pilots.
+    cruise_speed_m_s: float = 1.5
+    position_gain_s2: float = 0.8
+    velocity_gain_s: float = 1.5
+    max_acceleration_m_s2: float = 2.2
+    max_tilt_rad: float = float(np.deg2rad(23.0))
     attitude_gain_s: float = 3.2
     target_altitude_m: float = 1.5
 

@@ -10,7 +10,9 @@ from flightstack.math.quaternion import (
 )
 from flightstack.race import Gate, RaceState, Track
 from flightstack.runtime.autonomy import ClassicalPilotConfig, ClassicalRacePilot
+from flightstack.runtime.pilots import PilotKind
 from flightstack.sim.vehicle import FlightState, VehicleConfig
+from flightstack.web.server import FlightSession
 
 
 def vehicle() -> VehicleConfig:
@@ -73,3 +75,16 @@ def test_classical_config_rejects_unphysical_tilt() -> None:
 def test_body_z_rotation_contract_is_available_to_guidance() -> None:
     q = from_euler(0.0, 0.0, np.pi / 2.0)
     np.testing.assert_allclose(rotate(q, [1.0, 0.0, 0.0]), [0.0, 1.0, 0.0], atol=1e-12)
+
+
+def test_classical_baseline_finishes_reference_technical_eight() -> None:
+    session = FlightSession.create()
+    session.pilot = PilotKind.CLASSICAL
+    for _ in range(10_000):
+        session.step()
+        if session.crashed or session.race.finished:
+            break
+    assert not session.crashed
+    assert session.race.finished
+    assert session.race.best_lap_s is not None
+    assert session.race.best_lap_s < 20.0
