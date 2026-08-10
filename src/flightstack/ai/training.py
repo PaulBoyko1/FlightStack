@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
+import platform
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -17,8 +19,8 @@ from flightstack.ai.config import RacingAIConfig, load_racing_ai_config
 from flightstack.ai.environment import make_gymnasium_env
 from flightstack.ai.errors import TRAIN_EXTRA_COMMAND, OptionalTrainingDependencyError
 from flightstack.ai.observation import OBSERVATION_SCHEMA_VERSION
-from flightstack.ai.policy import PolicyMetadata, metadata_path_for_checkpoint
-from flightstack.race import Track
+from flightstack.ai.policy import PolicyMetadata, checkpoint_sha256, metadata_path_for_checkpoint
+from flightstack.race import Track, load_technical_eight
 from flightstack.sim.vehicle import VehicleConfig
 
 
@@ -52,6 +54,23 @@ class TrainingResult:
     checkpoint_path: Path
     metadata_path: Path
     total_timesteps: int
+
+
+def _canonical_hash(value: object) -> str:
+    """Hash JSON-safe FlightStack contracts in a stable representation."""
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _dependency_versions(sb3: Any) -> dict[str, str]:
+    """Record the actual training stack without making it a core dependency."""
+    return {
+        "python": platform.python_version(),
+        "numpy": np.__version__,
+        "stable_baselines3": str(getattr(sb3, "__version__", "unknown")),
+    }
 
 
 def _require_train_dependencies() -> tuple[Any, Any]:
@@ -93,13 +112,16 @@ def train_ppo(
     selected_training = PPOTrainingConfig() if training is None else training
     selected_vehicle = VehicleConfig.from_toml() if vehicle is None else vehicle
     selected_ai = load_racing_ai_config() if ai_config is None else ai_config
+    selected_track = load_technical_eight() if track is None else track
+    if not isinstance(selected_track, Track):
+        raise TypeError("track must be a Track")
     destination = Path(output_dir).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
 
     def environment_factory(index: int) -> Any:
         return make_gymnasium_env(
             vehicle=selected_vehicle,
-            track=track,
+            track=selected_track,
             ai_config=selected_ai,
         )
 
@@ -126,15 +148,26 @@ def train_ppo(
     finally:
         environment.close()
     checkpoint = checkpoint_base.with_suffix(".zip")
+    if not checkpoint.is_file():
+        raise RuntimeError("Stable-Baselines3 did not produce the expected PPO checkpoint")
     metadata = PolicyMetadata(
         action_schema_version=ACTION_SCHEMA_VERSION,
         observation_schema_version=OBSERVATION_SCHEMA_VERSION,
         vehicle_config_hash=selected_vehicle.config_hash,
+        ai_config_hash=selected_ai.config_hash,
+        control_period_s=selected_ai.environment.control_dt_s,
+        checkpoint_sha256=checkpoint_sha256(checkpoint),
         training={
             "algorithm": "PPO",
             "training_config": asdict(selected_training),
+            "ai_config": selected_ai.to_mapping(),
             "environment_schema_version": selected_ai.environment.schema_version,
             "reward_schema_version": selected_ai.reward.schema_version,
+            "track": {
+                "name": selected_track.name,
+                "contract_sha256": _canonical_hash(selected_track.to_mapping()),
+            },
+            "dependencies": _dependency_versions(sb3),
         },
     )
     metadata_path = metadata_path_for_checkpoint(checkpoint)

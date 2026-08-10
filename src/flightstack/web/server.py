@@ -63,14 +63,20 @@ def _event_mapping(event: RaceEvent) -> dict[str, object]:
 
 
 def _initial_state(config: VehicleConfig, start_position_world_m: np.ndarray) -> FlightState:
-    """Place a disarmed reference craft facing the first technical-eight gate."""
+    """Place a preflight craft in the same actuator state used by train/eval.
+
+    The simulation is not advanced until the session is armed, so hover motor
+    state here is an internal controller initial condition rather than a claim
+    that a real disarmed quad is spinning.  It prevents an unobserved zero-to-
+    hover motor transient from existing only in browser deployment.
+    """
     return FlightState(
         sim_time_s=0.0,
         position_world_m=start_position_world_m,
         velocity_world_m_s=np.zeros(3, dtype=np.float64),
         q_body_to_world_wxyz=from_euler(0.0, 0.0, np.pi / 2.0),
         body_rate_rad_s=np.zeros(3, dtype=np.float64),
-        motor_thrust_n=np.zeros(4, dtype=np.float64),
+        motor_thrust_n=np.full(4, config.hover_thrust_n / 4.0, dtype=np.float64),
     )
 
 
@@ -88,6 +94,7 @@ class FlightSession:
     armed: bool = False
     crashed: bool = False
     recorder: ReplayRecorder | None = None
+    last_command: PilotCommand | None = None
 
     @classmethod
     def create(cls, *, policy_path: str | Path | None = None) -> FlightSession:
@@ -155,6 +162,7 @@ class FlightSession:
         events = self.race.reset(0.0)
         self.armed = False
         self.crashed = False
+        self.last_command = None
         self.recorder = ReplayRecorder(
             {
                 "vehicle_config_hash": self.config.config_hash,
@@ -198,30 +206,37 @@ class FlightSession:
         if self.crashed or self.race.finished:
             return ()
         previous = self.state
-        command = self.current_command
         startup_events: tuple[RaceEvent, ...] = ()
         if not self.armed:
-            manual_ready = (
-                command.collective_thrust_n
-                >= self.config.hover_thrust_n * MANUAL_ARM_COLLECTIVE_FRACTION
-            )
-            if self.pilot in (PilotKind.CLASSICAL, PilotKind.LEARNED) or manual_ready:
-                self.armed = True
-                startup_events = self.race.start(previous.sim_time_s)
-                # A classical pilot needs the now-active next gate for its
-                # very first command, rather than an idle hover-only target.
+            if self.pilot is PilotKind.HUMAN:
                 command = self.current_command
-            else:
-                return ()
+                manual_ready = (
+                    command.collective_thrust_n
+                    >= self.config.hover_thrust_n * MANUAL_ARM_COLLECTIVE_FRACTION
+                )
+                if not manual_ready:
+                    self.last_command = command
+                    return ()
+            self.armed = True
+            startup_events = self.race.start(previous.sim_time_s)
+            # Autonomous pilots must see an active next gate on their first
+            # inference.  In particular, do not fill a learned 20 ms hold
+            # slot with an idle/preflight observation.
+            command = self.current_command
+        else:
+            command = self.current_command
+        self.last_command = command
         current, _mixed, _terms = self.runtime.step(command)
-        events = startup_events + self.race.update(
-            previous.position_world_m,
-            current.position_world_m,
-            current.sim_time_s,
-            previous_time_s=previous.sim_time_s,
-        )
         collision_events = self._collision_events(current)
-        recorded = events + collision_events
+        if collision_events:
+            recorded = startup_events + collision_events
+        else:
+            recorded = startup_events + self.race.update(
+                previous.position_world_m,
+                current.position_world_m,
+                current.sim_time_s,
+                previous_time_s=previous.sim_time_s,
+            )
         if self.recorder is not None:
             self.recorder.record(
                 current,
@@ -252,6 +267,13 @@ class FlightSession:
 
     def telemetry(self) -> dict[str, object]:
         state = self.state
+        # Telemetry must never query a mutable pilot: LearnedPolicyPilot's
+        # scheduler and previous-action history advance only in ``step``.
+        command = (
+            self.last_command
+            if self.last_command is not None
+            else PilotCommand.hover(self.config)
+        )
         race = self.race.to_mapping()
         next_gate = race["next_gate_index"]
         lap_time = (
@@ -280,8 +302,8 @@ class FlightSession:
             "state": state.to_mapping(),
             "motors": {"thrust_n": state.motor_thrust_n.tolist()},
             "pilot_command": {
-                "collective_thrust_n": self.current_command.collective_thrust_n,
-                "body_rate_rad_s": self.current_command.body_rate_rad_s.tolist(),
+                "collective_thrust_n": command.collective_thrust_n,
+                "body_rate_rad_s": command.body_rate_rad_s.tolist(),
             },
             "race": {
                 "lap": self.race.lap,

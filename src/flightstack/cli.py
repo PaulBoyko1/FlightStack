@@ -57,7 +57,7 @@ def _serve(args: argparse.Namespace) -> int:
 def _evaluate(args: argparse.Namespace) -> int:
     """Run one reproducible headless race and optionally write its artifacts."""
     from flightstack.ai.policy import LearnedPolicyPilot
-    from flightstack.experiments import load_scenario, run_episode
+    from flightstack.experiments import checkpoint_model_identity, load_scenario, run_episode
     from flightstack.runtime.autonomy import ClassicalRacePilot
     from flightstack.sim.vehicle import VehicleConfig
 
@@ -71,7 +71,12 @@ def _evaluate(args: argparse.Namespace) -> int:
         def learned_factory(vehicle: VehicleConfig) -> LearnedPolicyPilot:
             return LearnedPolicyPilot.from_checkpoint(args.policy, vehicle=vehicle)
 
-        result = run_episode(scenario, learned_factory, pilot_name="learned")
+        result = run_episode(
+            scenario,
+            learned_factory,
+            pilot_name="learned",
+            pilot_model_identity=checkpoint_model_identity(args.policy),
+        )
     payload = result.to_mapping()
     if args.output is not None:
         artifacts = result.write_artifacts(args.output)

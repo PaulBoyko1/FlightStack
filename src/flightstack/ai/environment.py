@@ -141,17 +141,17 @@ class FlightStackRaceEnv:
         for _ in range(self.environment.control_substeps):
             previous = self.state
             current, _mixed, _terms = self.runtime.step(command)
+            collision_id = self._collision_id(current)
+            if collision_id is not None:
+                events += self.race.record_collision(collision_id, current.sim_time_s)
+                reason = collision_id
+                break
             events += self.race.update_position(
                 previous.position_world_m,
                 current.position_world_m,
                 current.sim_time_s,
                 previous_time_s=previous.sim_time_s,
             )
-            collision_id = self._collision_id(current)
-            if collision_id is not None:
-                events += self.race.record_collision(collision_id, current.sim_time_s)
-                reason = collision_id
-                break
             if self._outside_course(current):
                 out_of_bounds = True
                 reason = "out_of_bounds"
@@ -301,7 +301,7 @@ def make_gymnasium_env(
     Gymnasium, or Stable-Baselines3 into the authoritative runtime.
     """
     try:
-        from gymnasium import Env, spaces  # type: ignore[import-not-found]
+        from gymnasium import Env, spaces
     except ModuleNotFoundError as exc:
         raise OptionalTrainingDependencyError(
             "Gymnasium support is optional; install it with " f"`{TRAIN_EXTRA_COMMAND}`."
@@ -309,7 +309,7 @@ def make_gymnasium_env(
 
     core = FlightStackRaceEnv(vehicle=vehicle, track=track, ai_config=ai_config)
 
-    class GymnasiumAdapter(Env):  # type: ignore[misc]
+    class GymnasiumAdapter(Env[NDArray[np.float32], NDArray[np.float32]]):
         metadata = FlightStackRaceEnv.metadata
 
         def __init__(self) -> None:

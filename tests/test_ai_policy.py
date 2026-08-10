@@ -48,10 +48,13 @@ def race() -> RaceState:
 
 
 def metadata(config: VehicleConfig) -> PolicyMetadata:
+    ai_config = load_racing_ai_config()
     return PolicyMetadata(
         action_schema_version=ACTION_SCHEMA_VERSION,
-        observation_schema_version=load_racing_ai_config().observation.schema_version,
+        observation_schema_version=ai_config.observation.schema_version,
         vehicle_config_hash=config.config_hash,
+        ai_config_hash=ai_config.config_hash,
+        control_period_s=ai_config.environment.control_dt_s,
     )
 
 
@@ -69,12 +72,33 @@ def test_learned_pilot_emits_only_shared_ctbr_command() -> None:
     np.testing.assert_allclose(pilot.previous_action, 0.0)
 
 
+def test_learned_pilot_holds_actions_at_the_training_control_rate() -> None:
+    config = vehicle()
+    policy = FixedPolicy(np.array([0.15, 0.1, -0.1, 0.0]))
+    pilot = LearnedPolicyPilot(config, policy, metadata=metadata(config))
+    state = FlightState.hovering(config)
+    active_race = race()
+
+    first = pilot.command(state, active_race, 0.002)
+    for _ in range(9):
+        held = pilot.command(state, active_race, 0.002)
+        assert held.collective_thrust_n == pytest.approx(first.collective_thrust_n)
+        np.testing.assert_allclose(held.body_rate_rad_s, first.body_rate_rad_s)
+    refreshed = pilot.command(state, active_race, 0.002)
+
+    assert policy.calls == 2
+    assert refreshed.collective_thrust_n == pytest.approx(first.collective_thrust_n)
+    np.testing.assert_allclose(refreshed.body_rate_rad_s, first.body_rate_rad_s)
+
+
 def test_learned_pilot_rejects_incompatible_metadata_or_bad_policy_output() -> None:
     config = vehicle()
     incompatible = PolicyMetadata(
         action_schema_version="old-action",
         observation_schema_version=load_racing_ai_config().observation.schema_version,
         vehicle_config_hash=config.config_hash,
+        ai_config_hash=load_racing_ai_config().config_hash,
+        control_period_s=load_racing_ai_config().environment.control_dt_s,
     )
     with pytest.raises(PolicySchemaError, match="action schema"):
         LearnedPolicyPilot(config, FixedPolicy(np.zeros(4)), metadata=incompatible)
@@ -93,3 +117,32 @@ def test_checkpoint_metadata_is_required_and_versioned(tmp_path) -> None:
     assert loaded.vehicle_config_hash == vehicle().config_hash
     with pytest.raises(PolicyNotTrainedError, match="does not exist"):
         LearnedPolicyPilot.from_checkpoint(tmp_path / "missing.zip")
+
+
+def test_learned_policy_rejects_numeric_contract_drift_and_tampered_checkpoint(tmp_path) -> None:
+    config = vehicle()
+    active = load_racing_ai_config()
+    drifted = PolicyMetadata(
+        action_schema_version=ACTION_SCHEMA_VERSION,
+        observation_schema_version=active.observation.schema_version,
+        vehicle_config_hash=config.config_hash,
+        ai_config_hash="0" * 64,
+        control_period_s=active.environment.control_dt_s,
+    )
+    with pytest.raises(PolicySchemaError, match="AI configuration"):
+        LearnedPolicyPilot(config, FixedPolicy(np.zeros(4)), metadata=drifted)
+
+    checkpoint = tmp_path / "ppo_model.zip"
+    checkpoint.write_bytes(b"not-an-sb3-model")
+    tampered = PolicyMetadata(
+        action_schema_version=ACTION_SCHEMA_VERSION,
+        observation_schema_version=active.observation.schema_version,
+        vehicle_config_hash=config.config_hash,
+        ai_config_hash=active.config_hash,
+        control_period_s=active.environment.control_dt_s,
+        checkpoint_sha256="0" * 64,
+    )
+    with metadata_path_for_checkpoint(checkpoint).open("w", encoding="utf-8") as handle:
+        json.dump(tampered.to_mapping(), handle)
+    with pytest.raises(PolicySchemaError, match="content does not match"):
+        LearnedPolicyPilot.from_checkpoint(checkpoint, vehicle=config)

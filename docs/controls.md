@@ -76,11 +76,12 @@ flightstack serve --policy artifacts/training-run/ppo_model.zip
 ```
 
 The required metadata sidecar must match FlightStack's action/observation
-schemas and current vehicle configuration.  Without `--policy`, the server
-returns a clear notice rather than pretending a model exists or falling back to
-Classical.  Compatibility is not a quality endorsement: the locally exercised
-PPO smoke and 10,000-step checkpoints did not complete the seeded
-technical-eight evaluation.  See [AI status](ai.md).
+schemas, current vehicle and complete AI configuration, 20 ms control period,
+and model-archive hash.  Without `--policy`, the server returns a clear notice
+rather than pretending a model exists or falling back to Classical.
+Compatibility is not a quality endorsement: the locally exercised PPO smoke
+and 10,000-step checkpoints did not complete the seeded technical-eight
+evaluation.  See [AI status](ai.md).
 
 ## Race behavior
 

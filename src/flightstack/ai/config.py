@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import tomllib
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -146,6 +148,28 @@ class RacingAIConfig:
     environment: EnvironmentConfig
     observation: ObservationConfig
     reward: RewardConfig
+
+    def to_mapping(self) -> dict[str, object]:
+        """Return the full numeric policy contract in a canonical mapping.
+
+        Schema labels alone do not protect a trained policy from a changed
+        observation scale or control interval.  This mapping deliberately
+        includes every checked-in training-facing value so checkpoints can pin
+        the exact contract they were optimized against.
+        """
+        return {
+            "environment": asdict(self.environment),
+            "observation": asdict(self.observation),
+            "reward": asdict(self.reward),
+        }
+
+    @property
+    def config_hash(self) -> str:
+        """SHA-256 identity of the complete validated AI configuration."""
+        encoded = json.dumps(
+            self.to_mapping(), sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     @classmethod
     def from_toml(cls, path: str | Path | None = None) -> RacingAIConfig:

@@ -75,11 +75,17 @@ not implement PPO from scratch.  It writes `ppo_model.zip` plus a required
 
 - action and observation schema versions;
 - the active `VehicleConfig` hash; and
-- algorithm, PPO configuration, environment schema, and reward schema.
+- the complete numeric AI-configuration hash and its 20 ms control period;
+- the SHA-256 content hash of `ppo_model.zip`; and
+- algorithm, PPO configuration, full AI contract, training track hash, and
+  Python/NumPy/SB3 dependency versions.
 
-`LearnedPolicyPilot.from_checkpoint()` validates those facts before loading an
-SB3 model.  A missing or incompatible sidecar, vehicle configuration, action
-schema, or observation schema is an error, never a fallback to Classical.
+`LearnedPolicyPilot.from_checkpoint()` validates the archive hash, vehicle,
+action/observation schemas, full AI configuration, and decision rate before
+loading an SB3 model.  The recorded track identifies the training run; the
+track-relative observation contract does not artificially restrict a policy to
+that one course.  A missing or incompatible sidecar is an error, never a
+fallback to Classical.
 
 To make a compatible local checkpoint selectable in the browser, start the
 server with it:

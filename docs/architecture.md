@@ -105,10 +105,11 @@ Every implemented high-level pilot uses the same CTBR boundary:
   It points its desired body `+Z` along a requested thrust vector and then
   emits a CTBR request.  It is not a trajectory optimizer.
 - `LearnedPolicyPilot` loads a Stable-Baselines3 PPO checkpoint only after its
-  required metadata sidecar confirms the action schema, observation schema,
-  and vehicle configuration hash.  It then emits CTBR through the same rate
-  controller, mixer, and motor path.  Missing or incompatible checkpoints do
-  not fall back to Human or Classical behavior.
+  required metadata sidecar confirms the archive content hash, action and
+  observation schemas, vehicle configuration, complete AI-configuration hash,
+  and control period.  It then emits CTBR through the same rate controller,
+  mixer, and motor path.  Missing or incompatible checkpoints do not fall back
+  to Human or Classical behavior.
 
 Tracks are JSON data.  `RaceState` accepts only the next ordered gate event;
 swept segment/plane intersection happens in the gate's local basis, so a fast

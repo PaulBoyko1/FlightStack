@@ -7,13 +7,18 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from flightstack.ai.policy import LearnedPolicyPilot
+from flightstack.race import Gate, RaceState, Track
 from flightstack.runtime.pilots import PilotKind
 from flightstack.web.server import FlightSession, create_app
 
 
 class FixedHoverPolicy:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def predict(self, observation: np.ndarray, *, deterministic: bool) -> tuple[np.ndarray, None]:
         del observation, deterministic
+        self.calls += 1
         return np.zeros(4, dtype=np.float32), None
 
 
@@ -86,3 +91,65 @@ def test_learned_mode_requires_a_checkpoint_then_uses_the_ctbr_adapter() -> None
     command = session.current_command
     assert command.collective_thrust_n == pytest.approx(session.config.hover_thrust_n)
     np.testing.assert_allclose(command.body_rate_rad_s, 0.0)
+
+
+def test_telemetry_does_not_advance_the_learned_policy_scheduler() -> None:
+    session = FlightSession.create()
+    policy = FixedHoverPolicy()
+    session.learned = LearnedPolicyPilot(session.config, policy)
+    assert session.set_pilot("learned") is None
+
+    # Broadcasting before physics advances must be observational.  A browser
+    # connect/disconnect cadence cannot change autonomous behavior.
+    session.telemetry()
+    session.telemetry()
+    assert policy.calls == 0
+    np.testing.assert_allclose(
+        session.state.motor_thrust_n,
+        session.config.hover_thrust_n / 4.0,
+    )
+
+    session.step()
+    assert session.race.running
+    assert policy.calls == 1
+    session.telemetry()
+    session.telemetry()
+    assert policy.calls == 1
+
+
+def test_session_records_collision_before_a_same_tick_finish(monkeypatch) -> None:
+    session = FlightSession.create()
+    gate = Gate(
+        center_world_m=[0.0, 0.0, 1.0],
+        normal_world=[0.0, 1.0, 0.0],
+        right_world=[-1.0, 0.0, 0.0],
+        up_world=[0.0, 0.0, 1.0],
+        half_width_m=2.0,
+        half_height_m=2.0,
+        gate_id="finish",
+        frame_thickness_m=0.0,
+        frame_depth_m=0.0,
+    )
+    session.race = RaceState(Track(name="collision-wins", gates=(gate,), gate_order=(1,)))
+    session.race.reset(0.0)
+    session.race.start(0.0)
+    session.pilot = PilotKind.CLASSICAL
+    session.armed = True
+    previous = session.state.copy()
+    previous.position_world_m[:] = [0.0, -1.0, 1.0]
+    session.runtime.reset(previous)
+    current = previous.copy()
+    current.sim_time_s = previous.sim_time_s + 0.002
+    current.position_world_m[:] = [0.0, 1.0, 1.0]
+    monkeypatch.setattr(session.runtime, "step", lambda command: (current, None, None))
+
+    def synthetic_collision(_state):
+        session.crashed = True
+        return session.race.record_collision("synthetic-frame", current.sim_time_s)
+
+    monkeypatch.setattr(session, "_collision_events", synthetic_collision)
+    events = session.step()
+
+    assert not session.race.finished
+    assert session.race.collisions == 1
+    assert [type(event).__name__ for event in events] == ["Collision"]

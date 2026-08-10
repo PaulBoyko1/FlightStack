@@ -8,6 +8,7 @@ from flightstack.ai.config import RacingAIConfig, load_racing_ai_config
 from flightstack.ai.environment import FlightStackRaceEnv, make_gymnasium_env
 from flightstack.ai.errors import OptionalTrainingDependencyError
 from flightstack.ai.spaces import BoxSpace
+from flightstack.race import Gate, Track
 
 
 def test_reset_seed_and_fixed_step_action_are_deterministic() -> None:
@@ -42,6 +43,57 @@ def test_environment_terminates_on_ground_collision_and_requires_reset() -> None
     assert any(event["type"] == "Collision" for event in info["events"])
     with pytest.raises(RuntimeError, match="call reset"):
         env.step(np.zeros(4))
+
+
+def test_environment_records_collision_before_a_same_tick_finish(monkeypatch) -> None:
+    gate = Gate(
+        center_world_m=[0.0, 0.0, 1.0],
+        normal_world=[0.0, 1.0, 0.0],
+        right_world=[-1.0, 0.0, 0.0],
+        up_world=[0.0, 0.0, 1.0],
+        half_width_m=2.0,
+        half_height_m=2.0,
+        gate_id="finish",
+        frame_thickness_m=0.0,
+        frame_depth_m=0.0,
+    )
+    base = load_racing_ai_config()
+    ai_config = RacingAIConfig(
+        environment=replace(
+            base.environment,
+            control_substeps=1,
+            initial_xy_jitter_m=0.0,
+            initial_altitude_jitter_m=0.0,
+            initial_yaw_jitter_rad=0.0,
+        ),
+        observation=base.observation,
+        reward=base.reward,
+    )
+    env = FlightStackRaceEnv(
+        track=Track(
+            name="collision-wins",
+            gates=(gate,),
+            gate_order=(1,),
+            start_position_world_m=[0.0, -1.0, 1.0],
+        ),
+        ai_config=ai_config,
+    )
+    env.reset(seed=0)
+    previous = env.state.copy()
+    previous.position_world_m[:] = [0.0, -1.0, 1.0]
+    env.runtime.reset(previous)
+    current = previous.copy()
+    current.sim_time_s = ai_config.environment.physics_dt_s
+    current.position_world_m[:] = [0.0, 1.0, 1.0]
+    monkeypatch.setattr(env.runtime, "step", lambda command: (current, None, None))
+    monkeypatch.setattr(env, "_collision_id", lambda state: "synthetic-frame")
+
+    _observation, _reward, terminated, _truncated, info = env.step(np.zeros(4))
+
+    assert terminated
+    assert not env.race.finished
+    assert env.race.collisions == 1
+    assert [event["type"] for event in info["events"]] == ["Collision"]
 
 
 def test_environment_truncates_at_configured_time_limit() -> None:

@@ -106,9 +106,9 @@ flightstack train --output artifacts/training-run --timesteps 10000 --seed 17
 
 Each run writes `ppo_model.zip` and a required
 `ppo_model.metadata.json` sidecar.  The sidecar versions the action and
-observation schemas, records the vehicle configuration hash, and retains the
-training configuration.  A supplied policy is loaded only when those contracts
-match:
+observation schemas, records the vehicle and complete AI-configuration hashes,
+the 20 ms control period, a content hash of the model archive, and the training
+configuration.  A supplied policy is loaded only when those contracts match:
 
 ```powershell
 flightstack serve --policy artifacts/training-run/ppo_model.zip
