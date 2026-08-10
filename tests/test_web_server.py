@@ -3,10 +3,18 @@ from __future__ import annotations
 import asyncio
 
 import numpy as np
+import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+from flightstack.ai.policy import LearnedPolicyPilot
 from flightstack.runtime.pilots import PilotKind
 from flightstack.web.server import FlightSession, create_app
+
+
+class FixedHoverPolicy:
+    def predict(self, observation: np.ndarray, *, deterministic: bool) -> tuple[np.ndarray, None]:
+        del observation, deterministic
+        return np.zeros(4, dtype=np.float32), None
 
 
 def test_server_health_websocket_and_command_path(tmp_path) -> None:
@@ -63,3 +71,18 @@ def test_server_health_websocket_and_command_path(tmp_path) -> None:
             await client.close()
 
     asyncio.run(exercise())
+
+
+def test_learned_mode_requires_a_checkpoint_then_uses_the_ctbr_adapter() -> None:
+    session = FlightSession.create()
+
+    notice = session.set_pilot("learned")
+
+    assert notice is not None
+    assert session.pilot is PilotKind.HUMAN
+    session.learned = LearnedPolicyPilot(session.config, FixedHoverPolicy())
+    assert session.set_pilot("learned") is None
+    assert session.pilot is PilotKind.LEARNED
+    command = session.current_command
+    assert command.collective_thrust_n == pytest.approx(session.config.hover_thrust_n)
+    np.testing.assert_allclose(command.body_rate_rad_s, 0.0)

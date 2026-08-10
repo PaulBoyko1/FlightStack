@@ -9,6 +9,7 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import NDArray
 
+from flightstack.race import RaceState
 from flightstack.sim.vehicle import FlightState, PilotCommand, VehicleConfig
 
 Vector = NDArray[np.float64]
@@ -37,7 +38,7 @@ class Pilot(Protocol):
 
     def reset(self, initial_state: FlightState) -> None: ...
 
-    def command(self, state: FlightState, race: RaceView, dt: float) -> PilotCommand: ...
+    def command(self, state: FlightState, race: RaceState, dt: float) -> PilotCommand: ...
 
 
 def deadzone_expo(value: float, *, deadzone: float, expo: float) -> float:

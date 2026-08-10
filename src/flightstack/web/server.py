@@ -17,6 +17,12 @@ from typing import Any
 import numpy as np
 from aiohttp import WSMsgType, web
 
+from flightstack.ai.errors import (
+    OptionalTrainingDependencyError,
+    PolicyNotTrainedError,
+    PolicySchemaError,
+)
+from flightstack.ai.policy import LearnedPolicyPilot
 from flightstack.math.quaternion import from_euler
 from flightstack.race import (
     RaceEvent,
@@ -77,13 +83,21 @@ class FlightSession:
     race: RaceState
     human: HumanPilot
     classical: ClassicalRacePilot
+    learned: LearnedPolicyPilot | None = None
     pilot: PilotKind = PilotKind.HUMAN
     armed: bool = False
     crashed: bool = False
     recorder: ReplayRecorder | None = None
 
     @classmethod
-    def create(cls) -> FlightSession:
+    def create(cls, *, policy_path: str | Path | None = None) -> FlightSession:
+        """Construct a session and optionally validate a learned checkpoint.
+
+        A supplied checkpoint is validated before a browser can select it.  A
+        missing model is not an error for the normal manual/classical launch;
+        it simply leaves the Learned control unavailable with an explicit UI
+        notice.
+        """
         config = VehicleConfig.from_toml()
         track = load_technical_eight()
         start = (
@@ -93,12 +107,23 @@ class FlightSession:
         )
         runtime = FixedStepRuntime(config, dt=PHYSICS_DT_S, state=_initial_state(config, start))
         race = RaceState(track)
+        learned: LearnedPolicyPilot | None = None
+        if policy_path is not None:
+            try:
+                learned = LearnedPolicyPilot.from_checkpoint(policy_path, vehicle=config)
+            except (
+                OptionalTrainingDependencyError,
+                PolicyNotTrainedError,
+                PolicySchemaError,
+            ) as exc:
+                raise ValueError(f"could not load learned FlightStack checkpoint: {exc}") from exc
         session = cls(
             config=config,
             runtime=runtime,
             race=race,
             human=HumanPilot(config),
             classical=ClassicalRacePilot(config),
+            learned=learned,
         )
         session.reset()
         return session
@@ -113,9 +138,9 @@ class FlightSession:
             return self.human.command(self.state, self.race, PHYSICS_DT_S)
         if self.pilot is PilotKind.CLASSICAL:
             return self.classical.command(self.state, self.race, PHYSICS_DT_S)
-        # LearnedPolicyPilot is installed when a checkpoint has been explicitly
-        # trained/exported; never silently substitute a classical policy.
-        return PilotCommand.hover(self.config)
+        if self.learned is None:
+            raise RuntimeError("learned pilot selected without a validated checkpoint")
+        return self.learned.command(self.state, self.race, PHYSICS_DT_S)
 
     def reset(self) -> tuple[RaceEvent, ...]:
         start = self.race.track.start_position_world_m
@@ -125,6 +150,8 @@ class FlightSession:
         self.runtime.reset(state)
         self.human.reset(state)
         self.classical.reset(state)
+        if self.learned is not None:
+            self.learned.reset(state)
         events = self.race.reset(0.0)
         self.armed = False
         self.crashed = False
@@ -158,7 +185,12 @@ class FlightSession:
         except ValueError as exc:
             raise ValueError("pilot must be one of human, classical, or learned") from exc
         if selected is PilotKind.LEARNED:
-            return "No trained checkpoint is loaded yet; select Human or Classical."
+            if self.learned is None:
+                return (
+                    "No validated learned checkpoint is loaded. Train one with "
+                    "`python -m flightstack.ai.training --output models/run --smoke`, "
+                    "then launch `flightstack serve --policy models/run/ppo_model.zip`."
+                )
         self.pilot = selected
         return None
 
@@ -173,7 +205,7 @@ class FlightSession:
                 command.collective_thrust_n
                 >= self.config.hover_thrust_n * MANUAL_ARM_COLLECTIVE_FRACTION
             )
-            if self.pilot is PilotKind.CLASSICAL or manual_ready:
+            if self.pilot in (PilotKind.CLASSICAL, PilotKind.LEARNED) or manual_ready:
                 self.armed = True
                 startup_events = self.race.start(previous.sim_time_s)
                 # A classical pilot needs the now-active next gate for its
@@ -240,6 +272,11 @@ class FlightSession:
             "type": "state",
             "sim_time_s": state.sim_time_s,
             "pilot": self.pilot.value,
+            "available_pilots": [
+                PilotKind.HUMAN.value,
+                PilotKind.CLASSICAL.value,
+                *([PilotKind.LEARNED.value] if self.learned is not None else []),
+            ],
             "state": state.to_mapping(),
             "motors": {"thrust_n": state.motor_thrust_n.tolist()},
             "pilot_command": {
@@ -387,10 +424,13 @@ def create_app(
     *,
     session: FlightSession | None = None,
     web_root: Path | None = None,
+    policy_path: str | Path | None = None,
 ) -> web.Application:
     """Build a testable aiohttp app with the browser as a pure client."""
     app = web.Application()
-    app[SESSION_KEY] = FlightSession.create() if session is None else session
+    app[SESSION_KEY] = (
+        FlightSession.create(policy_path=policy_path) if session is None else session
+    )
     app[CLIENTS_KEY] = set()
     app[WEB_ROOT_KEY] = default_web_dist() if web_root is None else web_root
     app.on_startup.append(_on_startup)
@@ -405,9 +445,14 @@ def create_app(
     return app
 
 
-def run(*, host: str = "127.0.0.1", port: int = 8000) -> None:
+def run(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    policy_path: str | Path | None = None,
+) -> None:
     """Run the local interactive service until interrupted."""
-    web.run_app(create_app(), host=host, port=port)
+    web.run_app(create_app(policy_path=policy_path), host=host, port=port)
 
 
 def event_mappings(events: Iterable[RaceEvent]) -> tuple[dict[str, object], ...]:
