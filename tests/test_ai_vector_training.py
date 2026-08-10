@@ -48,7 +48,8 @@ def test_reference_vector_env_keeps_exact_envs_seeded_and_shaped() -> None:
 
 
 def test_training_vectorizer_uses_subprocesses_only_for_multi_env_runs() -> None:
-    factory = lambda: object()
+    def factory() -> object:
+        return object()
 
     single = _make_vector_environment(_FakeVecEnvModule, [factory])
     parallel = _make_vector_environment(_FakeVecEnvModule, [factory, factory, factory, factory])
