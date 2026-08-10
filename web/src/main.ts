@@ -383,10 +383,11 @@ const applyStateToDrone = (elapsedSeconds: number): void => {
     prop.rotation.y += direction * (20 + currentState.motor_thrust_n[index] * 24) * elapsedSeconds;
   });
   const velocity = flightVectorToRender(currentState.velocity_world_m_s);
+  const speed = velocity.length();
   velocityArrow.position.copy(drone.group.position);
-  if (velocity.lengthSq() > 0.002) {
+  if (speed * speed > 0.002) {
     velocityArrow.setDirection(velocity.normalize());
-    velocityArrow.setLength(Math.min(2.2, velocity.length() * 0.2));
+    velocityArrow.setLength(Math.min(2.2, speed * 0.2));
   }
 };
 
