@@ -187,9 +187,14 @@ or a full 6DOF runtime.
 helpers, and validated vehicle configuration.  `rust/flightstack-sim`
 implements the deterministic motor/mixer/6DOF path.  The workspace embeds the
 same tracked vehicle TOML for the convenience reference loader, avoiding a
-second hand-maintained parameter set.  The interactive server does not yet
-dispatch physics to Rust, and a cross-language trajectory-parity suite remains
-to be added.
+second hand-maintained parameter set.  The shared
+[`python_rust_6dof_ctbr_v1.toml`](../tests/data/python_rust_6dof_ctbr_v1.toml)
+fixture is consumed independently by Python and Rust tests: six CTBR steps
+with force, torque, wind, and unequal motor efficiency compare motor thrust,
+position/velocity, sign-invariant attitude, and body rate to `1e-9` absolute
+tolerance (current measured maximum divergence: `2.22e-16`).  The interactive
+server does not yet dispatch physics to Rust; this is a reference-runtime
+contract guard, not a claim of a faster training backend.
 
 ## What this architecture intentionally does not do
 

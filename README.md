@@ -49,8 +49,10 @@ checked before they are treated as hardware work.
   a JAX backend** or a high-throughput replacement physics implementation.
   No JAX backend, curriculum, visual policy, or sim-to-real claim is shipped.
 - Rust is a tested reference runtime, but the interactive server and current
-  training environment use the Python reference runtime.  Cross-language
-  trajectory-parity experiments are still future work.
+  training environment use the Python reference runtime.  A shared six-step
+  Python/Rust disturbed-CTBR fixture guards the 6DOF contract (measured maximum
+  divergence: `2.22e-16`, with a `1e-9` test tolerance); it is not a JAX or
+  high-throughput-training parity claim.
 - No serial transport, MCU firmware integration, actuator interface, hardware
   arming state machine, or flight-test calibration is provided.
 
