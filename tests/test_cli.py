@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
+
 from flightstack.ai import training
 from flightstack.ai.errors import OptionalTrainingDependencyError
 from flightstack.cli import build_parser
+from flightstack.runtime.pilots import PilotKind
+from flightstack.runtime.replay import ReplayRecorder
+from flightstack.sim.vehicle import FlightState, PilotCommand, VehicleConfig
 
 
 def test_evaluate_command_writes_structured_artifacts_for_a_short_track(tmp_path, capsys) -> None:
@@ -80,3 +85,50 @@ def test_train_command_explains_the_optional_extra(monkeypatch, tmp_path, capsys
 
     assert args.func(args) == 2
     assert ".[train]" in capsys.readouterr().err
+
+
+def test_replay_command_inspects_and_exports_interpolated_state_frames(tmp_path, capsys) -> None:
+    config = VehicleConfig.from_toml()
+    recorder = ReplayRecorder({"seed": 4})
+    start = FlightState.hovering(config)
+    start.position_world_m = np.array([0.0, 0.0, 1.0])
+    recorder.record(
+        start,
+        PilotKind.HUMAN,
+        PilotCommand.hover(config),
+        events=({"type": "Start", "time_s": 0.0},),
+    )
+    finish = FlightState.hovering(config)
+    finish.sim_time_s = 1.0
+    finish.position_world_m = np.array([2.0, 0.0, 1.0])
+    recorder.record(
+        finish,
+        PilotKind.CLASSICAL,
+        PilotCommand.hover(config),
+        events=({"type": "GatePassed", "time_s": 1.0, "gate_index": 0},),
+    )
+    replay = recorder.write(tmp_path / "run.json")
+    csv_output = tmp_path / "replay.csv"
+    args = build_parser().parse_args(
+        [
+            "replay",
+            str(replay),
+            "--at",
+            "0.5",
+            "--interpolate",
+            "--csv",
+            str(csv_output),
+            "--sample-period",
+            "0.25",
+        ]
+    )
+
+    assert args.func(args) == 0
+
+    rendered = json.loads(capsys.readouterr().out)
+    assert rendered["frame_count"] == 2
+    assert rendered["events"] == {"GatePassed": 1, "Start": 1}
+    assert rendered["interpolated"]
+    assert rendered["frame"]["state"]["position_world_m"] == [1.0, 0.0, 1.0]
+    assert rendered["csv"] == str(csv_output)
+    assert len(csv_output.read_text(encoding="utf-8").splitlines()) == 6

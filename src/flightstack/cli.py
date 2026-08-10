@@ -89,6 +89,28 @@ def _evaluate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _replay(args: argparse.Namespace) -> int:
+    """Inspect a recorded replay and optionally export state frames as CSV."""
+    from flightstack.runtime.replay import ReplayPlayer, read_replay
+
+    replay = read_replay(args.path)
+    player = ReplayPlayer(replay)
+    payload = replay.summary()
+    if args.at is not None:
+        frame = player.frame_at(args.at, interpolate=args.interpolate)
+        payload["requested_time_s"] = args.at
+        payload["interpolated"] = bool(args.interpolate)
+        payload["frame"] = frame.to_mapping()
+    if args.csv is not None:
+        destination = player.export_csv(args.csv, sample_period_s=args.sample_period)
+        payload["csv"] = str(destination)
+        payload["csv_sample_period_s"] = args.sample_period
+    elif args.sample_period is not None:
+        raise ValueError("--sample-period requires --csv")
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
 def _train(args: argparse.Namespace) -> int:
     """Train PPO through the optional, maintained Stable-Baselines3 extra."""
     from flightstack.ai.errors import OptionalTrainingDependencyError
@@ -143,6 +165,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory for result, telemetry, and replay JSON",
     )
     evaluate.set_defaults(func=_evaluate)
+    replay = subparsers.add_parser(
+        "replay",
+        help="inspect a FlightStack replay-v1 file or export recorded state frames",
+    )
+    replay.add_argument("path", type=Path, help="replay JSON produced by a FlightStack session")
+    replay.add_argument(
+        "--at",
+        type=float,
+        help="simulation time to inspect (clamped to the recorded frame range)",
+    )
+    replay.add_argument(
+        "--interpolate",
+        action="store_true",
+        help="interpolate continuous state at --at; race/pilot/events remain discrete",
+    )
+    replay.add_argument("--csv", type=Path, help="write state, CTBR, race, and event data as CSV")
+    replay.add_argument(
+        "--sample-period",
+        type=float,
+        help="CSV interpolation period in seconds; omit to export authoritative source frames",
+    )
+    replay.set_defaults(func=_replay)
     train = subparsers.add_parser(
         "train",
         help="train a state-based PPO race policy (optional extra)",
