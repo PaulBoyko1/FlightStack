@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -17,6 +19,7 @@ from flightstack.race import (
     RaceEvent,
     RaceState,
     Track,
+    default_tracks_dir,
     gate_frame_collision,
     ground_collision,
     load_track,
@@ -33,6 +36,135 @@ class PilotFactory(Protocol):
     """Create a fresh comparable pilot for one independent episode."""
 
     def __call__(self, vehicle: VehicleConfig) -> Pilot: ...
+
+
+def _sha256_file(path: Path) -> str:
+    """Return a full SHA-256 digest without loading an artifact into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _json_safe_mapping(value: Mapping[str, object], *, name: str) -> dict[str, object]:
+    """Copy a mapping through canonical JSON so artifacts cannot contain opaque values."""
+    try:
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        decoded: object = json.loads(encoded)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be JSON-serializable") from exc
+    if not isinstance(decoded, dict):  # Defensive: JSON objects always decode to dicts.
+        raise ValueError(f"{name} must encode to a JSON object")
+    return {str(key): item for key, item in decoded.items()}
+
+
+def _mapping_sha256(value: Mapping[str, object]) -> str:
+    """Hash the same canonical JSON form persisted in episode provenance."""
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _resolved_track_source_path(track: str) -> Path:
+    """Mirror ``load_track`` bare-name resolution while preserving the source file identity."""
+    candidate = Path(track)
+    if candidate.suffix == "" and not candidate.exists():
+        candidate = default_tracks_dir() / f"{candidate.name}.json"
+    return candidate.resolve()
+
+
+def _repository_identity() -> tuple[str | None, bool | None]:
+    """Best-effort Git identity, intentionally harmless outside a checkout."""
+    repository_root = Path(__file__).resolve().parents[3]
+    try:
+        revision_result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=repository_root,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            timeout=2.0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    revision = revision_result.stdout.strip()
+    if not revision:
+        return None, None
+    try:
+        dirty_result = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=normal"],
+            cwd=repository_root,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            timeout=2.0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return revision, None
+    return revision, bool(dirty_result.stdout.strip())
+
+
+def checkpoint_model_identity(checkpoint_path: str | Path) -> dict[str, object]:
+    """Build an exact, portable provenance record for a learned checkpoint.
+
+    This helper deliberately does not import Stable-Baselines3.  It can be used
+    by a CLI or evaluation caller before constructing the learned pilot, and
+    records both the model archive and its FlightStack metadata sidecar when
+    present.
+    """
+    checkpoint = Path(checkpoint_path).expanduser()
+    if checkpoint.suffix == "" and checkpoint.with_suffix(".zip").is_file():
+        checkpoint = checkpoint.with_suffix(".zip")
+    checkpoint = checkpoint.resolve()
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"checkpoint file not found: {checkpoint}")
+    result: dict[str, object] = {
+        "checkpoint_path": str(checkpoint),
+        "checkpoint_sha256": _sha256_file(checkpoint),
+    }
+    metadata_path = checkpoint.with_suffix(".metadata.json")
+    if metadata_path.is_file():
+        result["metadata_path"] = str(metadata_path)
+        result["metadata_sha256"] = _sha256_file(metadata_path)
+    return result
+
+
+def _automatic_pilot_model_identity(pilot: Pilot) -> dict[str, object] | None:
+    """Record learned-policy metadata without making experiments depend on the AI extra."""
+    if pilot.kind is not PilotKind.LEARNED:
+        return None
+    metadata: object = getattr(pilot, "metadata", None)
+    serializer: object = getattr(metadata, "to_mapping", None)
+    if not callable(serializer):
+        return None
+    serialized_metadata: object = serializer()
+    if not isinstance(serialized_metadata, Mapping):
+        return None
+    policy: object = getattr(pilot, "policy", pilot)
+    return {
+        "policy_type": f"{type(policy).__module__}.{type(policy).__qualname__}",
+        "policy_metadata": _json_safe_mapping(serialized_metadata, name="policy metadata"),
+    }
+
+
+def _pilot_model_identity(
+    pilot: Pilot,
+    supplied: Mapping[str, object] | None,
+) -> Mapping[str, object] | None:
+    """Merge caller-supplied checkpoint identity with available policy metadata."""
+    automatic = _automatic_pilot_model_identity(pilot)
+    if supplied is None:
+        return automatic
+    if not isinstance(supplied, Mapping):
+        raise TypeError("pilot_model_identity must be a mapping when supplied")
+    identity = _json_safe_mapping(supplied, name="pilot_model_identity")
+    if automatic is not None:
+        return {**automatic, **identity}
+    return identity
 
 
 def _event_mapping(event: RaceEvent) -> dict[str, object]:
@@ -97,6 +229,13 @@ class EpisodeProvenance:
     vehicle_config_hash: str
     physics_dt_s: float
     scenario: ScenarioRealization
+    scenario_definition: Mapping[str, object] = field(default_factory=dict)
+    scenario_definition_sha256: str | None = None
+    track_source_path: str | None = None
+    track_content_sha256: str | None = None
+    git_revision: str | None = None
+    git_dirty: bool | None = None
+    pilot_model_identity: Mapping[str, object] | None = None
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -109,6 +248,15 @@ class EpisodeProvenance:
             "vehicle_config_hash": self.vehicle_config_hash,
             "physics_dt_s": self.physics_dt_s,
             "scenario": self.scenario.to_mapping(),
+            "scenario_definition": dict(self.scenario_definition),
+            "scenario_definition_sha256": self.scenario_definition_sha256,
+            "track_source_path": self.track_source_path,
+            "track_content_sha256": self.track_content_sha256,
+            "git_revision": self.git_revision,
+            "git_dirty": self.git_dirty,
+            "pilot_model_identity": (
+                None if self.pilot_model_identity is None else dict(self.pilot_model_identity)
+            ),
         }
 
 
@@ -222,6 +370,7 @@ def run_episode(
     *,
     pilot_name: str | None = None,
     vehicle_config: VehicleConfig | None = None,
+    pilot_model_identity: Mapping[str, object] | None = None,
 ) -> EpisodeResult:
     """Run one bounded fixed-step episode through the canonical CTBR seam.
 
@@ -234,7 +383,9 @@ def run_episode(
     config = VehicleConfig.from_toml() if vehicle_config is None else vehicle_config
     if not isinstance(config, VehicleConfig):
         raise TypeError("vehicle_config must be a VehicleConfig")
-    track = load_track(scenario.track)
+    track_source = _resolved_track_source_path(scenario.track)
+    track = load_track(track_source)
+    scenario_definition = _json_safe_mapping(scenario.to_mapping(), name="scenario definition")
     realization = scenario.realize()
     initial_state = _initial_state(config, track)
     runtime = FixedStepRuntime(config, dt=scenario.physics_dt_s, state=initial_state)
@@ -245,6 +396,7 @@ def run_episode(
     resolved_name = pilot.kind.value if pilot_name is None else pilot_name
     if not resolved_name:
         raise ValueError("pilot_name must be nonempty")
+    git_revision, git_dirty = _repository_identity()
     provenance = EpisodeProvenance(
         implementation="flightstack-python-reference-6dof",
         pilot_name=resolved_name,
@@ -255,6 +407,13 @@ def run_episode(
         vehicle_config_hash=config.config_hash,
         physics_dt_s=scenario.physics_dt_s,
         scenario=realization,
+        scenario_definition=scenario_definition,
+        scenario_definition_sha256=_mapping_sha256(scenario_definition),
+        track_source_path=str(track_source),
+        track_content_sha256=_sha256_file(track_source),
+        git_revision=git_revision,
+        git_dirty=git_dirty,
+        pilot_model_identity=_pilot_model_identity(pilot, pilot_model_identity),
     )
     recorder = ReplayRecorder({"provenance": provenance.to_mapping()})
     all_events: list[Mapping[str, object]] = [_event_mapping(event) for event in initial_events]
@@ -278,18 +437,23 @@ def run_episode(
         max_body_rate = max(max_body_rate, float(np.linalg.norm(current.body_rate_rad_s)))
         saturated_steps += int(mixed.saturated)
 
-        new_events = list(
-            race.update(
-                previous.position_world_m,
-                current.position_world_m,
-                current.sim_time_s,
-                previous_time_s=previous.sim_time_s,
-            )
-        )
         collision = _collision_object(current, track, scenario.vehicle_radius_m)
         if collision is not None:
             crashed = True
-            new_events.extend(race.record_collision(collision, current.sim_time_s))
+            # Collision has precedence over a same-tick swept gate crossing.
+            # Otherwise a final-gate finish marks the race finished first and
+            # RaceState correctly rejects the subsequent collision event,
+            # leaving a crashed episode with zero recorded collisions.
+            new_events = list(race.record_collision(collision, current.sim_time_s))
+        else:
+            new_events = list(
+                race.update(
+                    previous.position_world_m,
+                    current.position_world_m,
+                    current.sim_time_s,
+                    previous_time_s=previous.sim_time_s,
+                )
+            )
         mapped_events = tuple(_event_mapping(event) for event in new_events)
         all_events.extend(mapped_events)
 
@@ -359,5 +523,6 @@ __all__ = [
     "EpisodeResult",
     "PilotFactory",
     "TelemetrySample",
+    "checkpoint_model_identity",
     "run_episode",
 ]

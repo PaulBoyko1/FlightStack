@@ -12,6 +12,24 @@ from flightstack.experiments import (
     paired_evaluate,
 )
 from flightstack.runtime.autonomy import ClassicalRacePilot
+from flightstack.runtime.pilots import PilotKind
+from flightstack.sim.vehicle import FlightState, PilotCommand, VehicleConfig
+
+
+class FallingPilot:
+    """A deliberate failure fixture: it cuts thrust and never reaches the gate."""
+
+    kind = PilotKind.HUMAN
+
+    def __init__(self, vehicle: VehicleConfig) -> None:
+        self.vehicle = vehicle
+
+    def reset(self, initial_state: FlightState) -> None:
+        del initial_state
+
+    def command(self, state: FlightState, race, dt: float) -> PilotCommand:
+        del state, race, dt
+        return PilotCommand(collective_thrust_n=0.0, body_rate_rad_s=np.zeros(3))
 
 
 def write_straight_track(tmp_path):
@@ -83,9 +101,50 @@ def test_paired_classical_self_comparison_has_zero_seed_matched_delta(tmp_path) 
     assert len(evaluation.episodes) == 4
     assert evaluation.aggregates["classical-a"].completion_rate == 1.0
     assert comparison.matched_pairs == 2
+    assert comparison.completed_pairs == 2
     assert comparison.mean_elapsed_time_delta_s == pytest.approx(0.0)
     assert comparison.completion_rate_delta == pytest.approx(0.0)
     assert comparison.elapsed_time_delta_mean_ci.lower == pytest.approx(0.0)
+
+
+def test_paired_elapsed_delta_excludes_crashed_episodes(tmp_path) -> None:
+    track = write_straight_track(tmp_path)
+
+    def scenario_factory(seed: int) -> Scenario:
+        return Scenario(
+            name="paired-crash",
+            seed=seed,
+            track=str(track),
+            duration_s=1.5,
+            physics_dt_s=0.01,
+            telemetry_period_s=0.05,
+        )
+
+    evaluation = paired_evaluate(
+        {"classical": ClassicalRacePilot, "falling": FallingPilot},
+        [4],
+        scenario_factory,
+        bootstrap_samples=20,
+    )
+    comparison = evaluation.comparisons["falling"]
+    baseline = next(
+        result for result in evaluation.episodes if result.provenance.pilot_name == "classical"
+    )
+    contender = next(
+        result for result in evaluation.episodes if result.provenance.pilot_name == "falling"
+    )
+
+    assert baseline.metrics.completed
+    assert contender.metrics.termination == "crashed"
+    assert contender.metrics.elapsed_time_s < baseline.metrics.elapsed_time_s
+    assert comparison.matched_pairs == 1
+    assert comparison.completed_pairs == 0
+    assert comparison.completion_rate_delta == -1.0
+    assert comparison.mean_elapsed_time_delta_s is None
+    assert comparison.median_elapsed_time_delta_s is None
+    assert comparison.elapsed_time_delta_stddev_s is None
+    assert comparison.elapsed_time_delta_mean_ci is None
+    assert evaluation.to_mapping()["comparisons"]["falling"]["mean_elapsed_time_delta_s"] is None
 
 
 def test_robustness_grid_expands_wind_motor_and_seed_axes() -> None:

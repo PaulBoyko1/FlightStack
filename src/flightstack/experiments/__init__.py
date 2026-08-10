@@ -17,6 +17,7 @@ from flightstack.experiments.runner import (
     EpisodeResult,
     PilotFactory,
     TelemetrySample,
+    checkpoint_model_identity,
     run_episode,
 )
 from flightstack.experiments.scenario import (
@@ -42,6 +43,7 @@ __all__ = [
     "TelemetrySample",
     "bootstrap_mean_confidence_interval",
     "build_robustness_grid",
+    "checkpoint_model_identity",
     "default_scenarios_dir",
     "load_scenario",
     "paired_evaluate",

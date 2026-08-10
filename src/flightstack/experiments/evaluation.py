@@ -110,27 +110,38 @@ class PilotAggregate:
 
 @dataclass(frozen=True)
 class PairedComparison:
-    """Contender-minus-baseline outcome deltas computed on matching seeds."""
+    """Contender-minus-baseline outcome deltas computed on matching seeds.
+
+    Elapsed-time deltas are reported only for seeds on which *both* pilots
+    completed the course.  A crash or timeout therefore changes completion
+    outcomes but can never be mistaken for a faster finish.
+    """
 
     baseline_name: str
     contender_name: str
     matched_pairs: int
-    mean_elapsed_time_delta_s: float
-    median_elapsed_time_delta_s: float
-    elapsed_time_delta_stddev_s: float
+    mean_elapsed_time_delta_s: float | None
+    median_elapsed_time_delta_s: float | None
+    elapsed_time_delta_stddev_s: float | None
     completion_rate_delta: float
-    elapsed_time_delta_mean_ci: ConfidenceInterval
+    elapsed_time_delta_mean_ci: ConfidenceInterval | None
+    completed_pairs: int | None = None
 
     def to_mapping(self) -> dict[str, object]:
         return {
             "baseline_name": self.baseline_name,
             "contender_name": self.contender_name,
             "matched_pairs": self.matched_pairs,
+            "completed_pairs": self.completed_pairs,
             "mean_elapsed_time_delta_s": self.mean_elapsed_time_delta_s,
             "median_elapsed_time_delta_s": self.median_elapsed_time_delta_s,
             "elapsed_time_delta_stddev_s": self.elapsed_time_delta_stddev_s,
             "completion_rate_delta": self.completion_rate_delta,
-            "elapsed_time_delta_mean_ci": self.elapsed_time_delta_mean_ci.to_mapping(),
+            "elapsed_time_delta_mean_ci": (
+                None
+                if self.elapsed_time_delta_mean_ci is None
+                else self.elapsed_time_delta_mean_ci.to_mapping()
+            ),
         }
 
 
@@ -199,8 +210,9 @@ def paired_evaluate(
 
     It deliberately does not label a factory as human, classical, or learned;
     callers supply names and factories.  The result records completion rates
-    separately from elapsed-time deltas so a timeout cannot masquerade as a
-    fast lap.
+    separately from elapsed-time deltas.  Only pairs in which both pilots
+    finish contribute a time delta, so crashes and timeouts cannot masquerade
+    as fast laps.
     """
     pilot_items = tuple(pilots.items())
     if not pilot_items:
@@ -251,12 +263,15 @@ def paired_evaluate(
             continue
         baseline_results = [by_name_seed[(selected_baseline, seed)] for seed in normalized_seeds]
         contender_results = [by_name_seed[(name, seed)] for seed in normalized_seeds]
-        deltas = _values(
-            [
-                contender.metrics.elapsed_time_s - baseline.metrics.elapsed_time_s
-                for baseline, contender in zip(baseline_results, contender_results, strict=True)
-            ],
-            "paired elapsed-time deltas",
+        finished_deltas = [
+            contender.metrics.elapsed_time_s - baseline.metrics.elapsed_time_s
+            for baseline, contender in zip(baseline_results, contender_results, strict=True)
+            if baseline.metrics.completed and contender.metrics.completed
+        ]
+        deltas = (
+            _values(finished_deltas, "paired completed elapsed-time deltas")
+            if finished_deltas
+            else None
         )
         completion_delta = float(
             np.mean([result.metrics.completed for result in contender_results])
@@ -266,14 +281,19 @@ def paired_evaluate(
             baseline_name=selected_baseline,
             contender_name=name,
             matched_pairs=len(normalized_seeds),
-            mean_elapsed_time_delta_s=float(np.mean(deltas)),
-            median_elapsed_time_delta_s=float(np.median(deltas)),
-            elapsed_time_delta_stddev_s=_standard_deviation(deltas),
+            completed_pairs=len(finished_deltas),
+            mean_elapsed_time_delta_s=None if deltas is None else float(np.mean(deltas)),
+            median_elapsed_time_delta_s=None if deltas is None else float(np.median(deltas)),
+            elapsed_time_delta_stddev_s=None if deltas is None else _standard_deviation(deltas),
             completion_rate_delta=completion_delta,
-            elapsed_time_delta_mean_ci=bootstrap_mean_confidence_interval(
-                deltas,
-                seed=bootstrap_seed + len(pilot_items) + index,
-                bootstrap_samples=bootstrap_samples,
+            elapsed_time_delta_mean_ci=(
+                None
+                if deltas is None
+                else bootstrap_mean_confidence_interval(
+                    deltas,
+                    seed=bootstrap_seed + len(pilot_items) + index,
+                    bootstrap_samples=bootstrap_samples,
+                )
             ),
         )
     return PairedEvaluation(

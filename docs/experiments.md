@@ -17,8 +17,9 @@ model.
   a versioned FlightStack replay.  `write_artifacts()` writes `result.json`,
   `telemetry.json`, and `replay.json`.
 - `paired_evaluate()` runs supplied pilot factories against identical scenario
-  seeds, reports completion separately from elapsed-time deltas, and computes
-  seeded bootstrap intervals for mean outcomes.
+  seeds.  Its elapsed-time deltas use only pairs where both pilots finish, so
+  crashes and timeouts cannot be presented as a faster lap; completion is
+  reported separately.
 - `build_robustness_grid()` expands named wind-speed, motor-efficiency, and
   seed axes into explicit `Scenario` cases.  It is a grid builder, not an
   unreported benchmark run.
@@ -48,6 +49,12 @@ The command prints a JSON summary and, when `--output` is present, writes the
 three artifact files.  The summary includes termination type, elapsed time,
 completion/lap/gate/collision counts, distance/speed/rate statistics, mixer
 saturation count, final gate distance, and full scenario/vehicle provenance.
+That provenance includes the full scenario mapping and canonical hash, the
+resolved track source path and content hash, vehicle hash, and best-effort Git
+revision/dirty status.  Git fields are `null` outside an available checkout.
+Callers evaluating a learned artifact can pass
+`checkpoint_model_identity(checkpoint_path)` as `pilot_model_identity` to
+record model and metadata-sidecar hashes as well.
 
 `artifacts/` is ignored by Git.  Preserve a reviewed artifact set outside a
 discardable worktree or attach it to a documented experiment release; no result
@@ -60,6 +67,12 @@ pilot factories and seed set explicitly.  The critical property is that each
 pilot receives a fresh instance and the same `Scenario.with_seed(seed)`
 realization.  This prevents independently sampled wind/motor variation from
 being mistaken for a controller difference.
+
+`matched_pairs` is the number of seed-matched episodes; `completed_pairs` is
+the subset on which both pilots finished.  Elapsed-time delta statistics and
+their confidence interval are `null` when there are no completed pairs.  In
+that case, compare completion outcomes instead of inferring speed from crash or
+timeout time-to-termination.
 
 For a valid comparison, report:
 
