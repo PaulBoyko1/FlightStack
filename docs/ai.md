@@ -2,69 +2,130 @@
 
 ## Current status
 
-FlightStack does **not** ship a trained learned policy in this revision.  There
-is no `ai/` training package, Gymnasium environment, vectorized training
-backend, checkpoint artifact, reward-result table, or learned inference
-adapter.  Consequently, the interactive server explicitly declines a
-`learned` pilot request instead of silently using the classical baseline.
+FlightStack now has a real, state-based PPO training and inference path.  It
+is optional: install `.[train]` for Gymnasium and Stable-Baselines3, while the
+manual simulator and reference tests remain usable without those packages.
 
-This is intentional status reporting, not a claim that the classical pilot is
-an AI substitute.
-
-## Implemented seam for a future policy
-
-The stable interface is the high-level `Pilot` protocol:
+The path is deliberately narrow:
 
 ```text
-observation/history -> learned pilot -> PilotCommand (CTBR)
-                                      |
-                                      v
-                       rate PID -> mixer -> motor dynamics -> plant
+27-value state observation -> Stable-Baselines3 PPO -> normalized 4-action
+                                                        |
+                                                        v
+                                      LearnedPolicyPilot -> CTBR PilotCommand
+                                                        |
+                                                        v
+                                  rate PID -> mixer -> motors -> 6DOF/race
 ```
 
-`PilotCommand` contains collective thrust in newtons and body-rate targets in
-radians per second.  This is the same interface used by `HumanPilot` and
-`ClassicalRacePilot`; a learned policy must not bypass motor dynamics or use a
-different race judge.  Action scaling and clipping belong at the policy
-adapter boundary and must be logged with checkpoint metadata.
+`LearnedPolicyPilot` does not emit raw motor thrust.  It clips a normalized
+`[thrust, roll-rate, pitch-rate, yaw-rate]` action to `[-1, 1]`, maps zero
+thrust to physical hover, and scales rate commands by the same vehicle limits
+used by Human and Classical pilots.  This preserves one actuator/control seam
+for all three pilots.  When a 2 ms interactive or headless runtime calls the
+pilot, it holds each inferred command for the training-configured 20 ms control
+period before requesting the next action.  This preserves the 50 Hz
+train/deploy decision rate instead of querying the policy ten times faster.
 
-The canonical state/frame contract is documented in
-[architecture.md](architecture.md) and [frame-conventions.md](frame-conventions.md).
-Any scalar-last library or model must use the named quaternion adapter rather
-than silently changing the meaning of the state.
+## Environment and contracts
 
-## Required work before enabling `LEARNED`
+`FlightStackRaceEnv` is a NumPy-first race environment whose `step()` calls the
+existing `FixedStepRuntime` and `RaceState`.  One decision holds its CTBR action
+for ten exact 2 ms physics steps (a 50 Hz policy decision rate).  Gate crossing,
+ground/gate-frame collision, motor dynamics, and terminal behavior use the
+same FlightStack-owned reference path as headless evaluation.
 
-1. Define and test an observation schema using only data available to the
-   chosen policy mode, including explicit action/history semantics where used.
-2. Implement a Gymnasium-compatible racing environment that calls the
-   authoritative vehicle/race contracts or a parity-tested vectorized backend.
-3. Choose one primary high-throughput backend: either a thin vectorized JAX
-   implementation of FlightStack equations or a clean 5-inch adaptation of a
-   vetted backend.  It must share `VehicleConfig` semantics and have focused
-   parity scenarios against the reference runtime.
-4. Use a maintained PPO implementation rather than a home-grown optimizer;
-   record dependency versions, seeds, configuration hashes, reward terms,
-   normalization, action scaling, and checkpoint provenance.
-5. Evaluate against the classical baseline with paired seeds, report failure
-   modes and confidence intervals, and run a documented robustness grid before
-   presenting a policy as a result.
-6. Add a checkpoint loader that validates its metadata before the server makes
-   the learned mode selectable.  Keep the UI notice for absent or incompatible
-   checkpoints.
+The versioned configuration is
+[`config/ai/racing_v1.toml`](../config/ai/racing_v1.toml):
+
+- Reset jitter is seeded and bounded in horizontal position, altitude, and
+  yaw.  It is initial-state randomization, **not a curriculum**.
+- The observation has 27 normalized values: body velocity/rate; vectors and
+  normals for the next two ordered gates; world up in body coordinates; the
+  previous normalized action; next-gate distance; and world speed.  It omits a
+  raw quaternion to avoid the `q`/`-q` representation ambiguity.
+- Reward terms are visible and versioned: progress, gate/lap events, collision
+  and out-of-bounds penalties, action-delta and angular-rate penalties, and a
+  time penalty.
+- A native Gymnasium adapter is created only when the optional extra is
+  installed.  The core environment itself has no mandatory Gymnasium import.
+
+`ReferenceVectorEnv` can batch independent exact Python environments with
+explicit per-environment seeds.  It is a deterministic reference/evaluation
+helper, **not a JAX backend**, a claim of vectorized physics throughput, or a
+second simulation model.  PPO training uses Stable-Baselines3's `DummyVecEnv`
+around the native Gymnasium adapter.  No JAX backend, visual/sensor policy, or
+curriculum scheduler is implemented.
+
+## Training, metadata, and serving a policy
+
+Install the optional dependencies and produce a local checkpoint:
+
+```powershell
+python -m pip install -e '.[train]'
+flightstack train --output artifacts/training-smoke --smoke
+
+# Default PPO settings use 25,000 timesteps; choose an explicit experimental run.
+flightstack train --output artifacts/training-run --timesteps 10000 --seed 17
+```
+
+Training delegates PPO and the MLP implementation to Stable-Baselines3; it does
+not implement PPO from scratch.  It writes `ppo_model.zip` plus a required
+`ppo_model.metadata.json` sidecar.  The metadata records:
+
+- action and observation schema versions;
+- the active `VehicleConfig` hash; and
+- algorithm, PPO configuration, environment schema, and reward schema.
+
+`LearnedPolicyPilot.from_checkpoint()` validates those facts before loading an
+SB3 model.  A missing or incompatible sidecar, vehicle configuration, action
+schema, or observation schema is an error, never a fallback to Classical.
+
+To make a compatible local checkpoint selectable in the browser, start the
+server with it:
+
+```powershell
+flightstack serve --policy artifacts/training-run/ppo_model.zip
+```
+
+Without `--policy`, `LEARNED` remains unavailable and the server gives an
+explicit notice.  With `--policy`, selection means only that the checkpoint
+passed compatibility checks; it is not a performance endorsement.
+
+## Local training evidence and its limitation
+
+Two local PPO runs exercised the full export/load/evaluation plumbing:
+
+| Run | Training setting | Seeded technical-eight evaluation outcome |
+| --- | --- | --- |
+| Smoke | 256 PPO timesteps, seed 17 | Crashed, 0 gates, did not complete |
+| Longer check | 10,000 PPO timesteps, seed 17 | Crashed, 0 gates, did not complete |
+
+Both were evaluated on the named `technical-eight-wind-degraded` scenario at
+seed 42.  The local result/checkpoint directories are ignored by Git and are
+not shipped as model artifacts.  Therefore FlightStack currently has **no
+quality, recommended, or benchmark-winning learned checkpoint**.  Do not use
+either run as evidence of successful racing or real-world transfer.
+
+## What remains before a learned result can be claimed
+
+1. Improve the task/training recipe and demonstrate a checkpoint that completes
+   a declared evaluation set; retain failures and raw artifacts.
+2. Compare it with the Classical pilot on the same seeded scenarios using the
+   paired statistics tools, rather than comparing isolated best laps.
+3. Run and report a bounded robustness grid (wind and motor-efficiency hooks
+   are available) with completion/crash results and uncertainty intervals.
+4. Make a deliberate high-throughput-backend decision only after a dedicated
+   parity harness exists.  JAX is an option under consideration, not an
+   implemented or implied backend.
+5. Record dependency versions, checkpoint hashes, source commit, configuration
+   hashes, and complete scenario provenance with every report.
 
 ## Source/reuse boundary
 
-The pre-researched [source manifest](research/SOURCE_MANIFEST.md) maps the
-relevant pinned LSY Drone Racing, Crazyflow, SimpleFlight, and PPO plumbing
-references.  Those projects are implementation references, not vendored
-FlightStack code.  The manifest requires an explicit license/reuse update if a
-future integration adapts source or adds a model/dataset.
-
-## What a valid AI result must say
-
-A future report may say that a particular checkpoint achieved particular
-measured simulator results only when it includes the exact commit/configuration
-and evaluation artifact.  It must not call a generic 5-inch configuration a
-measured real drone, imply hardware transfer, or compare unequal control
-interfaces.  See [experiments.md](experiments.md) for the reporting contract.
+The pre-researched [source manifest](research/SOURCE_MANIFEST.md) maps pinned
+LSY Drone Racing, Crazyflow, SimpleFlight, and PPO-plumbing references.  The
+current environment, action/observation/reward contracts, policy adapter, and
+experiment code are FlightStack-native; those upstream projects are not
+vendored.  See [THIRD_PARTY.md](../THIRD_PARTY.md) and the
+[reuse audit](research/reuse-audit.md) for dependency and reuse status.

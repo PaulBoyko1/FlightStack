@@ -18,7 +18,7 @@ same process by WebSocket.  The physics and race state remain on the server.
 | `T` | Toggle the technical drawer/body axes/velocity vector |
 | `1` | Select Human pilot |
 | `2` | Select Classical pilot |
-| `3` | Request Learned pilot (currently refused: no checkpoint is loaded) |
+| `3` | Select Learned pilot when the server was launched with a compatible `--policy` checkpoint |
 
 Throttle is persistent: releasing `Space` or `Ctrl` holds its current value.
 This makes a keyboard usable as a simple throttle slider, but it also means a
@@ -68,9 +68,19 @@ smoke test for the exact same plant, collision, and race path.  Selecting a
 mode does not implicitly reset the session; use `R` when a fresh run is
 needed.
 
-`LEARNED` is visible to make the intended comparison seam clear, but it is not
-an available mode today.  The server returns a notice rather than pretending a
-model exists or falling back to Classical.  See [AI status](ai.md).
+`LEARNED` is available only when the server is launched with a compatible
+Stable-Baselines3 checkpoint, for example:
+
+```powershell
+flightstack serve --policy artifacts/training-run/ppo_model.zip
+```
+
+The required metadata sidecar must match FlightStack's action/observation
+schemas and current vehicle configuration.  Without `--policy`, the server
+returns a clear notice rather than pretending a model exists or falling back to
+Classical.  Compatibility is not a quality endorsement: the locally exercised
+PPO smoke and 10,000-step checkpoints did not complete the seeded
+technical-eight evaluation.  See [AI status](ai.md).
 
 ## Race behavior
 

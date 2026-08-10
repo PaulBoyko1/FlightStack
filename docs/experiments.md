@@ -1,74 +1,105 @@
 # Experiments and reproducibility
 
-## What is reproducible today
+## What is implemented
 
-The repository currently provides deterministic regression scenarios, not a
-published performance study.  The Python test suite covers the important
-contracts below:
+`flightstack.experiments` provides a headless, fixed-step evaluation path over
+the canonical Python vehicle, CTBR controller, motor model, gate state, and
+collision predicates.  It is not a second or simplified experiment physics
+model.
 
-- quaternion storage/frame adapters and non-identity attitude targets;
-- PID saturation/anti-windup, rotational dynamics, deterministic IMU, and HIL
-  frame validation;
-- 6DOF free fall, hover, motor response, mixer signs/saturation, disturbance
-  hooks, and fixed-step determinism;
-- swept gate crossing, gate-local geometry, wrong-order/repeated gate handling,
-  collision helpers, and a technical-eight state machine;
-- human CTBR mapping, replay serialization, server WebSocket behavior, and a
-  conservative classical pilot completing the reference course.
+- `Scenario` is a validated TOML-facing record for duration, physics timestep,
+  telemetry period, vehicle radius, wind/force/torque, motor efficiency, and
+  seed-owned jitter.
+- `run_episode()` creates a fresh pilot and runs the same
+  `PilotCommand -> rate PID -> mixer -> motors -> 6DOF` chain used by the
+  interactive service.
+- `EpisodeResult` holds provenance, metrics, event log, sampled telemetry, and
+  a versioned FlightStack replay.  `write_artifacts()` writes `result.json`,
+  `telemetry.json`, and `replay.json`.
+- `paired_evaluate()` runs supplied pilot factories against identical scenario
+  seeds, reports completion separately from elapsed-time deltas, and computes
+  seeded bootstrap intervals for mean outcomes.
+- `build_robustness_grid()` expands named wind-speed, motor-efficiency, and
+  seed axes into explicit `Scenario` cases.  It is a grid builder, not an
+  unreported benchmark run.
 
-Run the Python checks from the repository root:
+The checked-in
+[`technical-eight-wind-degraded`](../config/scenarios/technical-eight-wind-degraded.toml)
+scenario is a bounded 20 s, 2 ms reference case with seeded wind and mild
+per-motor degradation.  It is useful for reproducible comparison, not a proxy
+for hardware conditions.
+
+## Run a headless episode
 
 ```powershell
-pytest
-ruff check .
-mypy src
+# Defaults to the named technical-eight wind/degradation scenario.
+flightstack evaluate --pilot classical --output artifacts/classical-evaluation
+
+# A learned evaluation requires both the optional dependencies and a compatible
+# checkpoint plus its metadata sidecar.
+flightstack evaluate `
+  --pilot learned `
+  --policy artifacts/training-run/ppo_model.zip `
+  --scenario technical-eight-wind-degraded `
+  --output artifacts/learned-evaluation
 ```
 
-The CI workflow independently runs the C++ checks, Rust format/lint/tests, and
-the production web build.  These are correctness gates, not benchmark scores.
+The command prints a JSON summary and, when `--output` is present, writes the
+three artifact files.  The summary includes termination type, elapsed time,
+completion/lap/gate/collision counts, distance/speed/rate statistics, mixer
+saturation count, final gate distance, and full scenario/vehicle provenance.
 
-## Run provenance available now
+`artifacts/` is ignored by Git.  Preserve a reviewed artifact set outside a
+discardable worktree or attach it to a documented experiment release; no result
+is made reproducible merely by pasting a console summary into documentation.
 
-`VehicleConfig.config_hash` creates a stable short hash from the canonical
-vehicle mapping.  Interactive sessions create a `flightstack-replay-v1`
-`ReplayRecorder` containing the vehicle hash, track name, physics timestep,
-pilot kind, authoritative state, command, compact race data, and recorded
-events.  The recorder's Python `write(path)` method persists JSON for a test or
-an external experiment driver.
+## Paired comparison and robustness APIs
 
-At present there is no browser export button, no committed replay corpus, and
-no experiment-result artifact directory.  A successful unit test or classical
-smoke run must not be described as a statistical result.
+Paired evaluation is exposed as a Python API because callers must choose the
+pilot factories and seed set explicitly.  The critical property is that each
+pilot receives a fresh instance and the same `Scenario.with_seed(seed)`
+realization.  This prevents independently sampled wind/motor variation from
+being mistaken for a controller difference.
 
-## Minimum reporting record for future experiments
-
-Every numerical result should retain:
+For a valid comparison, report:
 
 | Record | Required content |
 | --- | --- |
 | Code identity | Git commit and dirty-worktree status |
-| Vehicle/track | TOML configuration hash, track JSON hash/name, lap/race rules |
+| Vehicle/track | TOML configuration hash, track name/hash, lap/race rules |
 | Runtime | Reference or training backend, timestep/control rate, OS/runtime versions |
 | Pilot | Pilot kind, checkpoint hash if any, action scaling and observation schema |
-| Randomness | Master seed and all derived episode seeds |
+| Randomness | Master seed, per-episode seeds, bootstrap seed/sample count |
 | Scenario | Initial-state distribution, wind/force/motor-efficiency disturbances, collision policy |
-| Outcomes | Completion/crash rate, gates/laps, lap-time distribution, return/reward if applicable |
-| Artifacts | Configs, summaries, raw or replay-backed episode records, plotting script version |
+| Outcomes | Completion/crash rate, gates/laps, lap-time distribution, paired deltas, reward if relevant |
+| Artifacts | Configs, summaries, telemetry/replays, and plotting/analysis script version |
 
-## Evaluation protocol to implement before reporting learned results
+The current statistical helper is correct only for the exact supplied samples;
+a narrow or all-failure set cannot establish a strong policy claim.  Keep
+timeouts, crashes, retries, and invalid episodes in the artifacts.
 
-1. Freeze the vehicle, track, collision, and CTBR contracts for the comparison.
-2. Run the classical baseline and learned policy on the same initial states and
-   disturbance seeds (paired seeds).
-3. Report means with dispersion/confidence intervals, completion/crash rate,
-   and a paired difference where appropriate rather than only a best lap.
-4. Sweep bounded wind, parameter, motor-efficiency, and sensor/noise conditions
-   in a named robustness grid; state precisely which conditions cause failure.
-5. Keep failures in the artifact set.  Do not omit crashes, invalid episodes,
-   or retry counts.
-6. Repeat a small set of deterministic scenarios across Python and the selected
-   high-throughput backend before treating faster-training results as reference
-   physics results.
+## Current PPO evidence
 
-This protocol is a requirement for future results; it has not yet produced a
-trained-policy report in this repository.
+The repository has real PPO training/export/inference plumbing, but it does
+not contain a successful learned racing result.  A local 256-step smoke run
+and a local 10,000-step full-course PPO run (both seed 17) were evaluated on
+`technical-eight-wind-degraded`, seed 42.  Both crashed before passing a gate
+and did not finish.  The checkpoints and result directories are ignored local
+artifacts, not shipped model weights or benchmark evidence.
+
+This is useful negative evidence: the pipeline is exercised, but the training
+recipe has not demonstrated competence.  Do not compare either run to the
+Classical baseline as if it were a quality policy.
+
+## What remains before reporting a learned result
+
+1. Freeze a declared vehicle/track/collision/CTBR contract for a comparison.
+2. Train a candidate whose held-out seeded evaluations meaningfully complete
+   the course; record every run and checkpoint hash.
+3. Run Classical and learned pilots on matching seeds, then report completion
+   differences and dispersion/intervals, not just a best lap.
+4. Execute a named robustness grid over bounded wind, parameter, and
+   motor-efficiency conditions; report failure boundaries as well as successes.
+5. Add a dedicated reference-versus-faster-backend parity harness before
+   interpreting results from any future high-throughput backend as reference
+   physics results.  `ReferenceVectorEnv` is not such a backend.

@@ -15,7 +15,7 @@ Three.js browser client -- JSON WebSocket --> FlightSession (Python)
               +---------------------------------+---------------------------+
               |                                 |                           |
               v                                 v                           v
-       HumanPilot                        ClassicalRacePilot          future LearnedPilot
+       HumanPilot                        ClassicalRacePilot   optional LearnedPolicyPilot
               \                                 |                           /
                +---------- CTBR PilotCommand: collective N, body-rate rad/s -+
                                                 |
@@ -104,9 +104,11 @@ Every implemented high-level pilot uses the same CTBR boundary:
 - `ClassicalRacePilot` is a conservative position/velocity guidance baseline.
   It points its desired body `+Z` along a requested thrust vector and then
   emits a CTBR request.  It is not a trajectory optimizer.
-- `PilotKind.LEARNED` is reserved for a future checkpoint-backed pilot.  There
-  is no learned model in the current repository; the server refuses that mode
-  instead of substituting another controller.
+- `LearnedPolicyPilot` loads a Stable-Baselines3 PPO checkpoint only after its
+  required metadata sidecar confirms the action schema, observation schema,
+  and vehicle configuration hash.  It then emits CTBR through the same rate
+  controller, mixer, and motor path.  Missing or incompatible checkpoints do
+  not fall back to Human or Classical behavior.
 
 Tracks are JSON data.  `RaceState` accepts only the next ordered gate event;
 swept segment/plane intersection happens in the gate's local basis, so a fast
@@ -114,13 +116,45 @@ pass is not missed because neither endpoint is near the gate center.  Ground
 and gate-frame helpers are separate from aperture crossing.  A session ends on
 the first configured collision and must be reset.
 
+## State-racing environment, training, and experiments
+
+`FlightStackRaceEnv` is a state-based environment over the same Python
+`FixedStepRuntime` and `RaceState` contracts.  A normalized four-value policy
+action is held across ten 2 ms physics steps, then maps into the shared CTBR
+command.  Its 27-value observation uses body-local gate/vehicle quantities and
+previous-action history rather than a raw quaternion; reward terms are
+versioned and exposed in environment information/telemetry.
+
+`LearnedPolicyPilot` uses that same configured 20 ms control period when it is
+called from a 2 ms interactive or headless runtime: it holds the last CTBR
+command between inference updates.  That train/deploy timing match prevents a
+checkpoint trained at 50 Hz from being queried at 500 Hz merely because the
+reference physics is faster.
+
+The NumPy core can be wrapped in a native Gymnasium environment when the
+optional `.[train]` dependencies are installed.  `flightstack train` delegates
+PPO/MLP optimization to Stable-Baselines3 and writes a model plus metadata;
+`flightstack serve --policy ...` validates and exposes a compatible checkpoint
+to the browser.  Compatibility is not a quality signal: no recommended learned
+checkpoint ships, and the locally exercised smoke and 10,000-step PPO runs did
+not complete their seeded technical-eight evaluation.
+
+`ReferenceVectorEnv` batches independent instances of the exact Python
+environment for deterministic batch/paired work.  It is intentionally not a
+JAX implementation or a high-throughput replacement physics backend.  The
+headless experiment runner similarly uses the canonical Python plant and can
+write summary, telemetry, and replay JSON for one named scenario.  Paired
+evaluation and robustness-grid construction are explicit APIs rather than
+implicit benchmark claims.
+
 ## Replay and telemetry
 
 `ReplayRecorder` captures authoritative fixed-step `FlightState`, pilot kind,
 CTBR command, compact race data, and event mappings as versioned JSON
-(`flightstack-replay-v1`).  It is session-owned and currently in memory; its
-Python `write()` API can persist a recording for a test or experiment.  The
-browser has no replay download control yet.
+(`flightstack-replay-v1`).  Interactive recordings are session-owned and in
+memory; its Python `write()` API can persist a recording.  The headless
+experiment runner emits replay JSON alongside result and sampled-telemetry
+artifacts.  The browser has no replay download control yet.
 
 Telemetry packets carry canonical state, motor thrust, current command, race
 status, and track geometry.  They are intended as inspection data, not a
@@ -158,5 +192,7 @@ to be added.
 - No browser-side authority or hidden browser physics.
 - No generic rigid-body engine replacing the multirotor equations.
 - No raw-motor learned policy default.
+- No JAX backend, curriculum scheduler, or claim that an exported PPO model is
+  a quality racing policy.
 - No claim that a simulator configuration is an identified physical vehicle.
 - No hardware transport or arming/failsafe authority.

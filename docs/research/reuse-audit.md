@@ -19,6 +19,13 @@ architecture.
 
 - **NumPy** (BSD-3-Clause) provides Python numerical arrays.
 - **aiohttp** (Apache-2.0) provides the local HTTP/WebSocket server.
+- **Gymnasium** (MIT) and **Stable-Baselines3** (MIT) are optional
+  training-facing dependencies (`.[train]` installs both for PPO work;
+  `.[dev]` also includes Gymnasium for adapter tests).  Gymnasium supplies the
+  native environment adapter and Stable-Baselines3 supplies PPO/MLP training
+  and checkpoint loading; the
+  FlightStack environment, action/observation/reward contracts, and CTBR
+  adapter remain FlightStack-owned.
 - **Three.js** `0.185.0` (MIT) provides browser rendering.  The drone and gate
   meshes in `web/src/main.ts` are procedural FlightStack code; no third-party
   meshes, textures, or environment assets are shipped.
@@ -32,10 +39,11 @@ package managers and is not committed as FlightStack source.
 
 ## Deferred reuse
 
-- A maintained PPO package will be selected only after the environment and
-  evaluation contract are implemented.
-- A single vectorized training backend will be chosen only after it can be
-  compared against the reference vehicle with focused parity scenarios.
+- A single high-throughput/vectorized training backend will be chosen only
+  after it can be compared against the reference vehicle with focused parity
+  scenarios.
+- `ReferenceVectorEnv` is intentionally an exact Python batch helper, not a
+  JAX/Crazyflow implementation or a replacement model.
 - Rapier/Parry remains deferred; the current small gate-frame/ground collision
   layer is FlightStack-owned and deliberately narrow.
 

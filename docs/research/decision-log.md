@@ -93,22 +93,50 @@ The scene maps FlightStack's Z-up coordinates to Three's Y-up basis at one UI
 boundary.  A future Rust server or higher-throughput training backend must
 demonstrate parity before it replaces this reference path.
 
-## 2026-08: Reserve, rather than fake, the learned-pilot mode
+## 2026-08: Require validation rather than fake a learned-pilot mode
 
 ### Decision
 
-Keep `PilotKind.LEARNED` and the common CTBR seam, but reject learned-mode
-selection until a metadata-validated trained checkpoint and inference adapter
-exist.
+Keep `PilotKind.LEARNED` and the common CTBR seam, and permit learned-mode
+selection only when a Stable-Baselines3 checkpoint has a metadata sidecar that
+matches the active vehicle plus the versioned action/observation schemas.
 
 ### Evidence
 
 The source pack calls for real PPO training/evaluation and the same CTBR
-semantics for human, classical, and learned pilots.  A placeholder policy or a
-silent fallback would make UI behavior and experimental claims misleading.
+semantics for human, classical, and learned pilots.  FlightStack now has an
+optional Gymnasium/Stable-Baselines3 path, but a placeholder, unvalidated
+checkpoint, or silent fallback would still make UI behavior and experimental
+claims misleading.
 
 ### Impact
 
-The classical pilot remains a deterministic baseline only.  The UI can expose
-the intended comparison, while the server clearly reports that no learned model
-is installed.
+The classical pilot remains a deterministic baseline only.  The server accepts
+`--policy` only after validation and otherwise reports that learned mode is
+unavailable.  Compatibility is deliberately distinct from quality: the local
+256-step and 10,000-step PPO checks did not complete the seeded technical-eight
+evaluation, so no learned checkpoint is shipped or recommended.
+
+## 2026-08: Keep training on the reference equations until parity exists
+
+### Decision
+
+Use the existing Python `FixedStepRuntime`/`RaceState` equations for the
+state-racing environment, `ReferenceVectorEnv`, and headless experiment runner.
+Use Stable-Baselines3 for PPO optimization, but do not claim a JAX or other
+high-throughput physics backend.
+
+### Evidence
+
+The source pack requires a bounded training-backend choice and a parity path.
+The new reference environment can train/evaluate through the same CTBR,
+motor, 6DOF, gate, and collision contracts immediately.  A batched Python
+wrapper is useful for deterministic tests but does not constitute a vectorized
+physics backend.
+
+### Impact
+
+Training and evaluation semantics remain inspectable and shared with the
+interactive reference runtime.  A JAX/Crazyflow-style backend remains a future
+decision gated on explicit parity scenarios, rather than a performance label
+attached to a different model.

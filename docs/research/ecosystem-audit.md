@@ -29,5 +29,10 @@ model.  They are not presented as measurements of a specific physical craft.
 - The current swept gate/race implementation is FlightStack-native.  LSY Drone
   Racing informed the choice of robust plane crossing and an explicit race
   state, but its source is not copied.
-- AI training infrastructure remains deferred.  No PPO framework, training
-  backend, learned checkpoint, model weight, or training dataset is shipped.
+- Gymnasium and Stable-Baselines3 are optional `.[train]` dependencies for the
+  FlightStack-native state racing environment, PPO plumbing, and metadata
+  checked checkpoint adapter.  No quality checkpoint, model weight, or dataset
+  ships; the local smoke and 10,000-step PPO runs did not complete their seeded
+  technical-eight evaluation.
+- `ReferenceVectorEnv` batches the exact Python reference environment.  The
+  high-throughput/JAX backend decision remains deferred pending parity work.

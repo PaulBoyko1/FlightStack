@@ -11,6 +11,8 @@ Git; package managers obtain their own copies under their respective licenses.
 | --- | --- | --- |
 | Python reference runtime | NumPy | vectors, matrices, deterministic numerical operations | BSD-3-Clause |
 | Python interactive server | aiohttp | local HTTP/WebSocket transport | Apache-2.0 |
+| Optional Python training | Gymnasium | native environment adapter / training API | MIT |
+| Optional Python training | Stable-Baselines3 | PPO and policy-network implementation | MIT |
 | Browser renderer | Three.js `0.185.0` | scene graph and WebGL rendering | MIT |
 | Browser development | Vite | web build/tooling | MIT |
 | Browser development | TypeScript | type checking/build input | Apache-2.0 |
@@ -18,6 +20,9 @@ Git; package managers obtain their own copies under their respective licenses.
 | Rust reference workspace | Serde | configuration/data serialization support | MIT OR Apache-2.0 |
 | Rust reference workspace | `toml` | TOML configuration parsing | MIT OR Apache-2.0 |
 
+These training-facing packages are optional to the base runtime; `.[train]`
+installs the pair for PPO work (the development extra also includes Gymnasium
+for adapter tests).  No checkpoint is included in the source distribution.
 Exact resolved package versions and transitive dependencies are captured by
 `web/pnpm-lock.yaml`, `rust/Cargo.lock`, and the Python environment used for a
 run.  Shipping a binary, browser bundle, checkpoint, or dataset may introduce
