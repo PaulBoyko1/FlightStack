@@ -5,6 +5,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .coverage
+*.log
 htmlcov/
 build/
 dist/
@@ -13,3 +14,8 @@ telemetry/
 .vscode/
 .idea/
 .DS_Store
+node_modules/
+web/dist/
+artifacts/
+models/*.zip
+models/*.pt

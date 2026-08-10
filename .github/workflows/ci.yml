@@ -29,6 +29,38 @@ jobs:
       - name: Build package
         run: python -m build
 
+  ai-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install optional training stack
+        run: pip install -e '.[train]'
+      - name: Exercise two-process PPO training
+        run: |
+          flightstack train \
+            --output /tmp/flightstack-ppo-ci \
+            --timesteps 256 \
+            --seed 17 \
+            --n-envs 2
+          test -f /tmp/flightstack-ppo-ci/ppo_model.zip
+          test -f /tmp/flightstack-ppo-ci/ppo_model.metadata.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          metadata = json.loads(
+              Path("/tmp/flightstack-ppo-ci/ppo_model.metadata.json").read_text(encoding="utf-8")
+          )
+          training = metadata["training"]["training_config"]
+          assert training["n_envs"] == 2, training
+          assert training["total_timesteps"] == 256, training
+          PY
+
   cpp:
     runs-on: ubuntu-latest
     steps:
@@ -39,3 +71,39 @@ jobs:
         run: cmake --build cpp/build --parallel
       - name: Test
         run: ctest --test-dir cpp/build --output-on-failure
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        working-directory: rust
+        run: cargo fmt --check
+      - name: Lint
+        working-directory: rust
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        working-directory: rust
+        run: cargo test --workspace
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Type check and build
+        working-directory: web
+        run: pnpm run build

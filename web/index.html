@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#10191d" />
+    <title>FlightStack // Digital Twin</title>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="flight-view" aria-label="FlightStack 3D flight view"></canvas>
+      <div class="vignette" aria-hidden="true"></div>
+
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="FlightStack home">
+          <span class="brand-mark">FS</span>
+          <span>FLIGHTSTACK</span>
+          <small>digital twin</small>
+        </a>
+        <div class="connection"><span id="connection-dot"></span><span id="connection-text">CONNECTING</span></div>
+      </header>
+
+      <section class="flight-hud" aria-label="Flight telemetry">
+        <div class="readout"><span class="label">SPEED</span><strong id="speed">0.0</strong><span class="unit">m/s</span></div>
+        <div class="readout"><span class="label">ALT</span><strong id="altitude">0.0</strong><span class="unit">m</span></div>
+        <div class="readout race-readout"><span class="label">RACE</span><strong id="gate">READY</strong><span class="unit" id="lap">LAP 0</span></div>
+      </section>
+
+      <aside class="controls-panel">
+        <div class="mode-row">
+          <button class="mode active" data-pilot="human">HUMAN <kbd>1</kbd></button>
+          <button class="mode" data-pilot="classical">CLASSICAL <kbd>2</kbd></button>
+          <button class="mode" data-pilot="learned">LEARNED <kbd>3</kbd></button>
+        </div>
+        <div class="control-row">
+          <button id="reset">RESET <kbd>R</kbd></button>
+          <button id="camera">CHASE <kbd>C</kbd></button>
+          <button id="technical">TECH <kbd>T</kbd></button>
+        </div>
+      </aside>
+
+      <section class="help-strip">
+        <span><kbd>W</kbd><kbd>S</kbd> pitch</span>
+        <span><kbd>A</kbd><kbd>D</kbd> roll</span>
+        <span><kbd>Q</kbd><kbd>E</kbd> yaw</span>
+        <span><kbd>SPACE</kbd>/<kbd>CTRL</kbd> throttle</span>
+      </section>
+
+      <aside class="minimap-shell" aria-label="Track minimap">
+        <div class="mini-title">TRACK // TECHNICAL EIGHT</div>
+        <canvas id="minimap" width="220" height="160"></canvas>
+      </aside>
+
+      <aside class="technical-drawer" id="technical-drawer" aria-live="polite">
+        <div class="drawer-title">FLIGHT TELEMETRY <span>500 HZ CORE</span></div>
+        <div class="telemetry-grid">
+          <div><span>RATE X</span><strong id="rate-x">0.00</strong></div>
+          <div><span>RATE Y</span><strong id="rate-y">0.00</strong></div>
+          <div><span>RATE Z</span><strong id="rate-z">0.00</strong></div>
+          <div><span>THRUST</span><strong id="thrust">0.0 N</strong></div>
+        </div>
+        <div class="motor-strip" id="motors"></div>
+      </aside>
+
+      <div class="toast" id="toast" role="status">Connecting to authoritative simulator…</div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

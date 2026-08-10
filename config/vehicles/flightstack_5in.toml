@@ -1,0 +1,57 @@
+# FlightStack reference 5-inch racing quad
+#
+# This is a transparent starting model, not a claim of measured hardware
+# parameters.  Values are intentionally rounded; provenance is documented in
+# docs/research/ecosystem-audit.md.  Every runtime consumes this one file.
+
+name = "flightstack_5in"
+version = "2026-08-v1"
+
+# ADAPTED FROM REFERENCE: Elodin AI Grand Prix's conservative generic 5-inch
+# model, retained here as a rounded starting point rather than a measurement.
+mass_kg = 0.65
+
+# ADAPTED FROM REFERENCE: generic 5-inch racing-quad estimate.
+inertia_kg_m2 = [
+  [0.0020, 0.0, 0.0],
+  [0.0, 0.0020, 0.0],
+  [0.0, 0.0, 0.0035],
+]
+
+# Body is FLU: +X forward, +Y left, +Z up.  Motor order is
+# front-left, rear-left, rear-right, front-right when viewed from above.
+motor_position_body_m = [
+  [0.0778, 0.0778, 0.0],
+  [-0.0778, 0.0778, 0.0],
+  [-0.0778, -0.0778, 0.0],
+  [0.0778, -0.0778, 0.0],
+]
+
+# TUNED FOR SIMULATION: +1 produces positive body-Z reaction torque.
+motor_spin_direction = [1.0, -1.0, 1.0, -1.0]
+
+# ADAPTED FROM REFERENCE: 14 N per rotor gives a plausible 5-inch racing-quad
+# thrust margin at the reference mass.
+motor_min_thrust_n = 0.0
+motor_max_thrust_n = 14.0
+motor_tau_rise_s = 0.015
+motor_tau_fall_s = 0.025
+
+# ADAPTED FROM REFERENCE: reaction moment divided by thrust (meters).
+thrust_to_reaction_torque_m = 0.014
+
+# TUNED FOR SIMULATION: linear body-frame aerodynamic damping.
+linear_drag_n_per_m_s = [0.15, 0.15, 0.25]
+angular_drag_nm_per_rad_s = [0.008, 0.008, 0.012]
+gravity_m_s2 = 9.80665
+
+[control]
+# TUNED FOR SIMULATION: body-rate loop gains and safety limits.  The loop is
+# intentionally represented separately from vehicle physics so an embedded C++
+# implementation can occupy this seam later.
+rate_kp = [0.050, 0.050, 0.032]
+rate_ki = [0.010, 0.010, 0.006]
+rate_kd = [0.0015, 0.0015, 0.0010]
+rate_torque_limit_nm = [0.26, 0.26, 0.16]
+rate_integral_limit = [1.2, 1.2, 1.2]
+max_body_rate_rad_s = [5.5, 5.5, 4.0]

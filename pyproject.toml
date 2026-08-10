@@ -8,17 +8,28 @@ version = "0.1.0"
 description = "Simulation-first quaternion attitude control and HIL toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "MIT"
 authors = [{name = "Paul Boyko"}]
-dependencies = ["numpy>=1.26"]
+# NumPy 2.5's public stubs require Python 3.12 syntax while FlightStack still
+# type-checks its supported Python 3.11 baseline.  Keep the runtime range broad
+# but prevent a fresh 3.11 CI install from receiving incompatible stubs.
+dependencies = [
+  "aiohttp>=3.10",
+  "numpy>=1.26,<2.5",
+]
 
 [project.optional-dependencies]
 dev = [
   "build>=1.2",
+  "gymnasium>=0.29",
   "mypy>=1.11",
   "pytest>=8.0",
   "pytest-cov>=5.0",
   "ruff>=0.6",
+]
+train = [
+  "gymnasium>=0.29",
+  "stable-baselines3>=2.3",
 ]
 
 [project.scripts]

@@ -115,12 +115,93 @@ def to_rotation_matrix(q: ArrayLike) -> NDArray[np.float64]:
     )
 
 
+def from_rotation_matrix(matrix: ArrayLike) -> Vector:
+    """Create a canonical scalar-first quaternion from a proper 3D rotation.
+
+    The input matrix is interpreted as body-to-world.  It is validated instead
+    of silently projecting an arbitrary matrix onto SO(3), so a caller cannot
+    accidentally hide a frame or numerical-contract error in the autonomy
+    layer.
+    """
+    rotation = np.asarray(matrix, dtype=np.float64)
+    if rotation.shape != (3, 3) or not np.all(np.isfinite(rotation)):
+        raise ValueError("rotation matrix must be a finite 3x3 matrix")
+    if not np.allclose(rotation.T @ rotation, np.eye(3), rtol=1e-9, atol=1e-10):
+        raise ValueError("rotation matrix must be orthonormal")
+    if not np.isclose(np.linalg.det(rotation), 1.0, rtol=1e-9, atol=1e-10):
+        raise ValueError("rotation matrix must have determinant +1")
+
+    trace = float(np.trace(rotation))
+    if trace > 0.0:
+        scale = 2.0 * np.sqrt(trace + 1.0)
+        quaternion = np.array(
+            [
+                0.25 * scale,
+                (rotation[2, 1] - rotation[1, 2]) / scale,
+                (rotation[0, 2] - rotation[2, 0]) / scale,
+                (rotation[1, 0] - rotation[0, 1]) / scale,
+            ],
+            dtype=np.float64,
+        )
+    elif rotation[0, 0] > rotation[1, 1] and rotation[0, 0] > rotation[2, 2]:
+        scale = 2.0 * np.sqrt(1.0 + rotation[0, 0] - rotation[1, 1] - rotation[2, 2])
+        quaternion = np.array(
+            [
+                (rotation[2, 1] - rotation[1, 2]) / scale,
+                0.25 * scale,
+                (rotation[0, 1] + rotation[1, 0]) / scale,
+                (rotation[0, 2] + rotation[2, 0]) / scale,
+            ],
+            dtype=np.float64,
+        )
+    elif rotation[1, 1] > rotation[2, 2]:
+        scale = 2.0 * np.sqrt(1.0 + rotation[1, 1] - rotation[0, 0] - rotation[2, 2])
+        quaternion = np.array(
+            [
+                (rotation[0, 2] - rotation[2, 0]) / scale,
+                (rotation[0, 1] + rotation[1, 0]) / scale,
+                0.25 * scale,
+                (rotation[1, 2] + rotation[2, 1]) / scale,
+            ],
+            dtype=np.float64,
+        )
+    else:
+        scale = 2.0 * np.sqrt(1.0 + rotation[2, 2] - rotation[0, 0] - rotation[1, 1])
+        quaternion = np.array(
+            [
+                (rotation[1, 0] - rotation[0, 1]) / scale,
+                (rotation[0, 2] + rotation[2, 0]) / scale,
+                (rotation[1, 2] + rotation[2, 1]) / scale,
+                0.25 * scale,
+            ],
+            dtype=np.float64,
+        )
+    return normalize(quaternion)
+
+
 def rotate(q: ArrayLike, vector_body: ArrayLike) -> Vector:
     return to_rotation_matrix(q) @ _vec(vector_body, 3, "vector_body")
 
 
 def rotate_inverse(q: ArrayLike, vector_world: ArrayLike) -> Vector:
     return to_rotation_matrix(q).T @ _vec(vector_world, 3, "vector_world")
+
+
+def wxyz_to_xyzw(q_wxyz: ArrayLike) -> Vector:
+    """Adapt FlightStack's scalar-first quaternion for scalar-last APIs.
+
+    This is intentionally a named boundary rather than a convenience scattered
+    through render, ML, or third-party integration code.  Both representations
+    retain the same body-to-world rotation semantics.
+    """
+    w, x, y, z = _vec(q_wxyz, 4, "q_wxyz")
+    return np.array([x, y, z, w], dtype=np.float64)
+
+
+def xyzw_to_wxyz(q_xyzw: ArrayLike) -> Vector:
+    """Adapt a scalar-last body-to-world quaternion into FlightStack form."""
+    x, y, z, w = _vec(q_xyzw, 4, "q_xyzw")
+    return np.array([w, x, y, z], dtype=np.float64)
 
 
 def relative_body_error(current: ArrayLike, target: ArrayLike) -> Vector:

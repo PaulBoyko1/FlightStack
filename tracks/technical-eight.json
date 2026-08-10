@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "name": "technical-eight",
+  "description": "An eight-gate figure-eight reference course with alternating heights and angled gates.",
+  "default_laps": 1,
+  "ground_height_m": 0.0,
+  "start_position_world_m": [0.0, -5.4, 1.2],
+  "gates": [
+    {
+      "id": "start-split",
+      "center_world_m": [0.0, -4.0, 1.45],
+      "normal_world": [0.0, 1.0, 0.0],
+      "right_world": [-1.0, 0.0, 0.0],
+      "up_world": [0.0, 0.0, 1.0],
+      "width_m": 1.8,
+      "height_m": 1.8,
+      "frame_thickness_m": 0.08,
+      "frame_depth_m": 0.10
+    },
+    {
+      "id": "left-entry",
+      "center_world_m": [-2.25, -1.85, 1.95],
+      "normal_world": [-0.7071067812, 0.7071067812, 0.0],
+      "right_world": [-0.7071067812, -0.7071067812, 0.0],
+      "up_world": [0.0, 0.0, 1.0],
+      "width_m": 1.55,
+      "height_m": 1.55,
+      "frame_thickness_m": 0.08,
+      "frame_depth_m": 0.10
+    },
+    {
+      "id": "left-apex",
+      "center_world_m": [-3.9, 0.15, 1.45],
+      "normal_world": [0.0, 1.0, 0.0],
+      "right_world": [-1.0, 0.0, 0.0],
+      "up_world": [0.0, 0.0, 1.0],
+      "width_m": 1.45,
+      "height_m": 1.45,
+      "frame_thickness_m": 0.08,
+      "frame_depth_m": 0.10
+    },
+    {
+      "id": "left-exit",
+      "center_world_m": [-2.05, 2.2, 1.75],
+      "normal_world": [0.7071067812, 0.7071067812, 0.0],
+      "right_world": [-0.7071067812, 0.7071067812, 0.0],
+      "up_world": [0.0, 0.0, 1.0],
+      "width_m": 1.55,
+      "height_m": 1.55,
+      "frame_thickness_m": 0.08,
+      "frame_depth_m": 0.10
+    },
+    {
+      "id": "crossover",
+      "center_world_m": [0.0, 0.0, 2.25],
+      "normal_world": [0.7071067812, -0.7071067812, 0.0],
+      "right_world": [0.7071067812, 0.7071067812, 0.0],
+      "up_world": [0.0, 0.0, 1.0],
+      "width_m": 1.35,
+      "height_m": 1.35,
+      "frame_thickness_m": 0.08,
+      "frame_depth_m": 0.10
+    },
+    {
+      "id": "right-entry",
+      "center_world_m": [2.05, 2.2, 1.7],
+      "normal_world": [0.7071067812, 0.7071067812, 0.0],
+      "right_world": [-0.7071067812, 0.7071067812, 0.0],
+      "up_world": [0.0, 0.0, 1.0],
+      "width_m": 1.55,
+      "height_m": 1.55,
+      "frame_thickness_m": 0.08,
+      "frame_depth_m": 0.10
+    },
+    {
+      "id": "right-apex",
+      "center_world_m": [3.9, 0.15, 1.4],
+      "normal_world": [0.0, -1.0, 0.0],
+      "right_world": [1.0, 0.0, 0.0],
+      "up_world": [0.0, 0.0, 1.0],
+      "width_m": 1.45,
+      "height_m": 1.45,
+      "frame_thickness_m": 0.08,
+      "frame_depth_m": 0.10
+    },
+    {
+      "id": "right-exit",
+      "center_world_m": [2.3, -1.9, 1.9],
+      "normal_world": [-0.7071067812, -0.7071067812, 0.0],
+      "right_world": [0.7071067812, -0.7071067812, 0.0],
+      "up_world": [0.0, 0.0, 1.0],
+      "width_m": 1.55,
+      "height_m": 1.55,
+      "frame_thickness_m": 0.08,
+      "frame_depth_m": 0.10
+    }
+  ],
+  "gate_order": [1, 2, 3, 4, 5, 6, 7, 8]
+}
