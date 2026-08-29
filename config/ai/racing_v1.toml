@@ -35,10 +35,13 @@ schema_version = "flightstack-race-observation-v1"
 # 25     distance to next gate / distance_scale_m                     [ 0, 1]
 # 26     world speed / speed_scale_m_s                                [ 0, 1]
 # No quaternion is fed to the policy: local vectors avoid q/-q ambiguity.
-body_velocity_scale_m_s = 18.0
-gate_vector_scale_m = 24.0
-distance_scale_m = 40.0
-speed_scale_m_s = 24.0
+# Keep these v1 normalization scales stable so existing checkpoints and exact
+# observation fixtures retain their semantics even though the physical course
+# envelope is now larger.
+body_velocity_scale_m_s = 12.0
+gate_vector_scale_m = 12.0
+distance_scale_m = 20.0
+speed_scale_m_s = 15.0
 
 [reward]
 schema_version = "flightstack-race-reward-v1"
