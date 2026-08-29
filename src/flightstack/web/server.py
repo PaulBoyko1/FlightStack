@@ -40,10 +40,10 @@ PHYSICS_DT_S = 0.002
 TELEMETRY_EVERY_STEPS = 15
 VEHICLE_COLLISION_RADIUS_M = 0.13
 MAX_CATCHUP_STEPS = 100
-# A manual pilot must deliberately reach almost-hover thrust before time starts.
-# That gives a newly connected browser a stable preflight scene instead of
-# consuming a run while no person has had a chance to send an input.
-MANUAL_ARM_COLLECTIVE_FRACTION = 0.95
+MANUAL_TAKEOFF_TRIGGER = 0.55
+MANUAL_GROUND_CLEARANCE_M = 0.005
+MANUAL_TAKEOFF_ALTITUDE_TOLERANCE_M = 0.06
+MANUAL_TAKEOFF_VERTICAL_SPEED_TOLERANCE_M_S = 0.15
 
 
 def default_web_dist() -> Path:
@@ -87,21 +87,25 @@ def _event_mapping(event: RaceEvent) -> dict[str, object]:
     return result
 
 
-def _initial_state(config: VehicleConfig, start_position_world_m: np.ndarray) -> FlightState:
-    """Place a preflight craft in the same actuator state used by train/eval.
-
-    The simulation is not advanced until the session is armed, so hover motor
-    state here is an internal controller initial condition rather than a claim
-    that a real disarmed quad is spinning.  It prevents an unobserved zero-to-
-    hover motor transient from existing only in browser deployment.
-    """
+def _initial_state(
+    config: VehicleConfig,
+    start_position_world_m: np.ndarray,
+    *,
+    motors_idle: bool = False,
+) -> FlightState:
+    """Place the craft at a deterministic preflight state."""
+    motor_thrust = (
+        np.zeros(4, dtype=np.float64)
+        if motors_idle
+        else np.full(4, config.hover_thrust_n / 4.0, dtype=np.float64)
+    )
     return FlightState(
         sim_time_s=0.0,
         position_world_m=start_position_world_m,
         velocity_world_m_s=np.zeros(3, dtype=np.float64),
         q_body_to_world_wxyz=from_euler(0.0, 0.0, np.pi / 2.0),
         body_rate_rad_s=np.zeros(3, dtype=np.float64),
-        motor_thrust_n=np.full(4, config.hover_thrust_n / 4.0, dtype=np.float64),
+        motor_thrust_n=motor_thrust,
     )
 
 
@@ -118,26 +122,29 @@ class FlightSession:
     pilot: PilotKind = PilotKind.HUMAN
     armed: bool = False
     crashed: bool = False
+    manual_takeoff_active: bool = False
     recorder: ReplayRecorder | None = None
     last_command: PilotCommand | None = None
 
     @classmethod
     def create(cls, *, policy_path: str | Path | None = None) -> FlightSession:
-        """Construct a session and optionally validate a learned checkpoint.
-
-        A supplied checkpoint is validated before a browser can select it.  A
-        missing model is not an error for the normal manual/classical launch;
-        it simply leaves the Learned control unavailable with an explicit UI
-        notice.
-        """
+        """Construct a session and optionally validate a learned checkpoint."""
         config = VehicleConfig.from_toml()
         track = load_technical_eight()
-        start = (
+        configured_start = (
             np.array([0.0, -5.4, 1.2], dtype=np.float64)
             if track.start_position_world_m is None
             else np.asarray(track.start_position_world_m, dtype=np.float64)
         )
-        runtime = FixedStepRuntime(config, dt=PHYSICS_DT_S, state=_initial_state(config, start))
+        ground_start = configured_start.copy()
+        ground_start[2] = (
+            track.ground_height_m + VEHICLE_COLLISION_RADIUS_M + MANUAL_GROUND_CLEARANCE_M
+        )
+        runtime = FixedStepRuntime(
+            config,
+            dt=PHYSICS_DT_S,
+            state=_initial_state(config, ground_start, motors_idle=True),
+        )
         race = RaceState(track)
         learned: LearnedPolicyPilot | None = None
         if policy_path is not None:
@@ -164,9 +171,36 @@ class FlightSession:
     def state(self) -> FlightState:
         return self.runtime.state
 
+    def _configured_start(self) -> np.ndarray:
+        start = self.race.track.start_position_world_m
+        if start is None:
+            return np.array([0.0, 0.0, 1.2], dtype=np.float64)
+        return np.asarray(start, dtype=np.float64).copy()
+
+    def _manual_ground_start(self) -> np.ndarray:
+        start = self._configured_start()
+        start[2] = (
+            self.race.track.ground_height_m
+            + VEHICLE_COLLISION_RADIUS_M
+            + MANUAL_GROUND_CLEARANCE_M
+        )
+        return start
+
+    @property
+    def manual_hover_altitude_m(self) -> float:
+        configured = self._configured_start()
+        minimum = (
+            self.race.track.ground_height_m
+            + VEHICLE_COLLISION_RADIUS_M
+            + 0.65
+        )
+        return max(float(configured[2]), minimum)
+
     @property
     def current_command(self) -> PilotCommand:
         if self.pilot is PilotKind.HUMAN:
+            if self.manual_takeoff_active:
+                return self.human.takeoff_command(self.state, self.manual_hover_altitude_m)
             return self.human.command(self.state, self.race, PHYSICS_DT_S)
         if self.pilot is PilotKind.CLASSICAL:
             return self.classical.command(self.state, self.race, PHYSICS_DT_S)
@@ -175,10 +209,9 @@ class FlightSession:
         return self.learned.command(self.state, self.race, PHYSICS_DT_S)
 
     def reset(self) -> tuple[RaceEvent, ...]:
-        start = self.race.track.start_position_world_m
-        if start is None:
-            start = np.array([0.0, 0.0, 1.2], dtype=np.float64)
-        state = _initial_state(self.config, np.asarray(start, dtype=np.float64))
+        human_grounded = self.pilot is PilotKind.HUMAN
+        start = self._manual_ground_start() if human_grounded else self._configured_start()
+        state = _initial_state(self.config, start, motors_idle=human_grounded)
         self.runtime.reset(state)
         self.human.reset(state)
         self.classical.reset(state)
@@ -187,6 +220,7 @@ class FlightSession:
         events = self.race.reset(0.0)
         self.armed = False
         self.crashed = False
+        self.manual_takeoff_active = False
         self.last_command = None
         self.recorder = ReplayRecorder(
             {
@@ -196,10 +230,15 @@ class FlightSession:
                 "pilot": self.pilot.value,
             }
         )
+        initial_command = (
+            PilotCommand(0.0, np.zeros(3, dtype=np.float64))
+            if human_grounded
+            else PilotCommand.hover(self.config)
+        )
         self.recorder.record(
             state,
             self.pilot,
-            PilotCommand.hover(self.config),
+            initial_command,
             race=self.race.to_mapping(),
             events=event_mappings(events),
         )
@@ -224,51 +263,67 @@ class FlightSession:
             selected = PilotKind(str(raw_kind))
         except ValueError as exc:
             raise ValueError("pilot must be one of human, classical, or learned") from exc
-        if selected is PilotKind.LEARNED:
-            if self.learned is None:
-                return (
-                    "No validated learned checkpoint is loaded. Train one with "
-                    "`python -m flightstack.ai.training --output models/run --smoke`, "
-                    "then launch `flightstack serve --policy models/run/ppo_model.zip`."
-                )
+        if selected is PilotKind.LEARNED and self.learned is None:
+            return (
+                "No validated learned checkpoint is loaded. Train one with "
+                "`python -m flightstack.ai.training --output models/run --smoke`, "
+                "then launch `flightstack serve --policy models/run/ppo_model.zip`."
+            )
         self.pilot = selected
         return None
+
+    def _manual_takeoff_complete(self, state: FlightState) -> bool:
+        return (
+            abs(float(state.position_world_m[2]) - self.manual_hover_altitude_m)
+            <= MANUAL_TAKEOFF_ALTITUDE_TOLERANCE_M
+            and abs(float(state.velocity_world_m_s[2]))
+            <= MANUAL_TAKEOFF_VERTICAL_SPEED_TOLERANCE_M_S
+        )
 
     def step(self) -> tuple[RaceEvent, ...]:
         if self.crashed or self.race.finished:
             return ()
         previous = self.state
         startup_events: tuple[RaceEvent, ...] = ()
+
         if not self.armed:
             if self.pilot is PilotKind.HUMAN:
-                command = self.current_command
-                manual_ready = (
-                    command.collective_thrust_n
-                    >= self.config.hover_thrust_n * MANUAL_ARM_COLLECTIVE_FRACTION
-                )
-                if not manual_ready:
-                    self.last_command = command
+                # Grounded manual sessions are genuinely inert.  The existing
+                # browser sends 0.62 while Space is held and 0.5 at neutral, so
+                # Space is an explicit takeoff trigger without a protocol fork.
+                if self.human.input.throttle <= MANUAL_TAKEOFF_TRIGGER:
+                    self.last_command = PilotCommand(
+                        0.0, np.zeros(3, dtype=np.float64)
+                    )
                     return ()
-            self.armed = True
-            startup_events = self.race.start(previous.sim_time_s)
-            # Autonomous pilots must see an active next gate on their first
-            # inference.  In particular, do not fill a learned 20 ms hold
-            # slot with an idle/preflight observation.
-            command = self.current_command
+                self.armed = True
+                self.manual_takeoff_active = True
+                command = self.current_command
+            else:
+                self.armed = True
+                startup_events = self.race.start(previous.sim_time_s)
+                command = self.current_command
         else:
             command = self.current_command
+
         self.last_command = command
         current, _mixed, _terms = self.runtime.step(command)
         collision_events = self._collision_events(current)
         if collision_events:
             recorded = startup_events + collision_events
         else:
-            recorded = startup_events + self.race.update(
-                previous.position_world_m,
-                current.position_world_m,
-                current.sim_time_s,
-                previous_time_s=previous.sim_time_s,
-            )
+            if self.pilot is PilotKind.HUMAN and self.manual_takeoff_active:
+                if self._manual_takeoff_complete(current):
+                    self.manual_takeoff_active = False
+                    startup_events = self.race.start(current.sim_time_s)
+                recorded = startup_events
+            else:
+                recorded = startup_events + self.race.update(
+                    previous.position_world_m,
+                    current.position_world_m,
+                    current.sim_time_s,
+                    previous_time_s=previous.sim_time_s,
+                )
         if self.recorder is not None:
             self.recorder.record(
                 current,
@@ -299,12 +354,14 @@ class FlightSession:
 
     def telemetry(self) -> dict[str, object]:
         state = self.state
-        # Telemetry must never query a mutable pilot: LearnedPolicyPilot's
-        # scheduler and previous-action history advance only in ``step``.
         command = (
             self.last_command
             if self.last_command is not None
-            else PilotCommand.hover(self.config)
+            else (
+                PilotCommand(0.0, np.zeros(3, dtype=np.float64))
+                if self.pilot is PilotKind.HUMAN and not self.armed
+                else PilotCommand.hover(self.config)
+            )
         )
         race = self.race.to_mapping()
         next_gate = race["next_gate_index"]
@@ -318,9 +375,20 @@ class FlightSession:
             if self.crashed
             else "finished"
             if self.race.finished
+            else "preflight"
+            if self.pilot is PilotKind.HUMAN and (not self.armed or self.manual_takeoff_active)
             else "running"
             if self.armed
             else "preflight"
+        )
+        manual_phase = (
+            "grounded"
+            if self.pilot is PilotKind.HUMAN and not self.armed
+            else "takeoff"
+            if self.pilot is PilotKind.HUMAN and self.manual_takeoff_active
+            else "flying"
+            if self.pilot is PilotKind.HUMAN
+            else "autonomous"
         )
         return {
             "type": "state",
@@ -331,6 +399,7 @@ class FlightSession:
                 PilotKind.CLASSICAL.value,
                 *([PilotKind.LEARNED.value] if self.learned is not None else []),
             ],
+            "manual_phase": manual_phase,
             "vehicle": {
                 "name": self.config.name,
                 "version": self.config.version,
@@ -380,13 +449,7 @@ async def _broadcast(app: web.Application) -> None:
 
 
 async def _physics_loop(app: web.Application) -> None:
-    """Advance exact 2 ms steps while tracking real elapsed wall time.
-
-    Windows commonly rounds a short ``asyncio.sleep`` to roughly 15 ms.  A
-    simple one-step-per-wake loop would consequently run a 500 Hz simulation
-    at about 60 Hz.  Accumulating elapsed time preserves both the canonical
-    fixed integration step and human-real-time pacing across platforms.
-    """
+    """Advance exact 2 ms steps while tracking real elapsed wall time."""
     loop = asyncio.get_running_loop()
     last_tick = loop.time()
     accumulator_s = 0.0
