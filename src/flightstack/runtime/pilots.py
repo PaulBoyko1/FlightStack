@@ -9,7 +9,11 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import NDArray
 
-from flightstack.math.quaternion import rotate
+from flightstack.math.quaternion import (
+    from_rotation_matrix,
+    rotate,
+    rotation_vector_error,
+)
 from flightstack.race import RaceState
 from flightstack.sim.vehicle import FlightState, PilotCommand, VehicleConfig
 
@@ -43,12 +47,7 @@ class Pilot(Protocol):
 
 
 def deadzone_expo(value: float, *, deadzone: float, expo: float) -> float:
-    """Normalize a signed stick with a continuous deadzone and cubic expo.
-
-    ``expo=0`` is linear after the deadzone; ``expo=1`` is fully cubic.  This
-    function is deliberately shared by keyboard/gamepad input and unit-tested
-    separately from browser event handling.
-    """
+    """Normalize a signed stick with a continuous deadzone and cubic expo."""
     scalar = float(value)
     if not np.isfinite(scalar) or not np.isfinite(deadzone) or not np.isfinite(expo):
         raise ValueError("stick value, deadzone, and expo must be finite")
@@ -68,10 +67,9 @@ def deadzone_expo(value: float, *, deadzone: float, expo: float) -> float:
 def hover_centered_collective(throttle: float, config: VehicleConfig) -> float:
     """Map a human throttle in ``[0, 1]`` with 0.5 at physical hover.
 
-    This low-level mapping is retained for direct/acro-style experiments.  The
-    default interactive human pilot uses a stabilized vertical-speed mapping
-    below so keyboard altitude controls do not turn the large racing-quad
-    thrust reserve into an accidental launch command.
+    This low-level mapping remains useful for direct/acro experiments.  The
+    default interactive HumanPilot is intentionally game-style and instead
+    closes velocity/attitude loops before emitting the same CTBR contract.
     """
     value = float(throttle)
     if not np.isfinite(value):
@@ -86,7 +84,14 @@ def hover_centered_collective(throttle: float, config: VehicleConfig) -> float:
 
 @dataclass(frozen=True)
 class ManualInput:
-    """Normalized Mode-2-style human controls after browser/device capture."""
+    """Normalized game-style human controls captured by the browser.
+
+    ``pitch`` is forward/back intent, ``roll`` is right/left intent, ``yaw``
+    is turn intent, and ``throttle`` is centered vertical-speed intent once the
+    craft is airborne.  The names remain protocol-compatible with the original
+    transmitter-style client while the default HumanPilot provides stabilized
+    movement.
+    """
 
     throttle: float = 0.0
     roll: float = 0.0
@@ -108,33 +113,42 @@ class ManualInput:
 class ManualControlConfig:
     deadzone: float = 0.07
     expo: float = 0.32
-    roll_rate_scale: float = 1.0
-    pitch_rate_scale: float = 1.0
-    yaw_rate_scale: float = 0.82
-    max_vertical_speed_m_s: float = 3.0
-    vertical_speed_kp: float = 3.0
+    yaw_rate_scale: float = 0.72
+    max_vertical_speed_m_s: float = 2.2
+    vertical_speed_kp: float = 3.2
     max_vertical_accel_m_s2: float = 4.0
-    min_up_alignment: float = 0.35
+    max_horizontal_speed_m_s: float = 4.5
+    horizontal_speed_kp: float = 2.4
+    max_horizontal_accel_m_s2: float = 5.0
+    attitude_kp: float = 5.0
+    max_stabilized_rate_rad_s: float = 4.0
+    takeoff_max_speed_m_s: float = 1.4
+    takeoff_altitude_kp: float = 2.0
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.deadzone < 1.0:
             raise ValueError("deadzone must be in [0, 1)")
         if not 0.0 <= self.expo <= 1.0:
             raise ValueError("expo must be in [0, 1]")
-        if min(self.roll_rate_scale, self.pitch_rate_scale, self.yaw_rate_scale) <= 0.0:
-            raise ValueError("manual rate scales must be positive")
-        if self.max_vertical_speed_m_s <= 0.0:
-            raise ValueError("max_vertical_speed_m_s must be positive")
-        if self.vertical_speed_kp <= 0.0:
-            raise ValueError("vertical_speed_kp must be positive")
-        if self.max_vertical_accel_m_s2 <= 0.0:
-            raise ValueError("max_vertical_accel_m_s2 must be positive")
-        if not 0.0 < self.min_up_alignment <= 1.0:
-            raise ValueError("min_up_alignment must be in (0, 1]")
+        for name, value in (
+            ("yaw_rate_scale", self.yaw_rate_scale),
+            ("max_vertical_speed_m_s", self.max_vertical_speed_m_s),
+            ("vertical_speed_kp", self.vertical_speed_kp),
+            ("max_vertical_accel_m_s2", self.max_vertical_accel_m_s2),
+            ("max_horizontal_speed_m_s", self.max_horizontal_speed_m_s),
+            ("horizontal_speed_kp", self.horizontal_speed_kp),
+            ("max_horizontal_accel_m_s2", self.max_horizontal_accel_m_s2),
+            ("attitude_kp", self.attitude_kp),
+            ("max_stabilized_rate_rad_s", self.max_stabilized_rate_rad_s),
+            ("takeoff_max_speed_m_s", self.takeoff_max_speed_m_s),
+            ("takeoff_altitude_kp", self.takeoff_altitude_kp),
+        ):
+            if not np.isfinite(float(value)) or float(value) <= 0.0:
+                raise ValueError(f"{name} must be positive and finite")
 
 
 class HumanPilot:
-    """Mutable human pilot that maps shaped input to the shared CTBR contract."""
+    """Stabilized keyboard/gamepad pilot sharing the normal CTBR control seam."""
 
     kind = PilotKind.HUMAN
 
@@ -154,67 +168,142 @@ class HumanPilot:
         del initial_state
         self.input = ManualInput()
 
-    def _stabilized_collective(self, state: FlightState) -> float:
-        """Convert centered throttle into a bounded vertical-speed command.
+    @staticmethod
+    def _horizontal_unit(vector: Vector, fallback: Vector) -> Vector:
+        horizontal = np.array([vector[0], vector[1], 0.0], dtype=np.float64)
+        norm = float(np.linalg.norm(horizontal))
+        if norm < 1e-8:
+            return fallback.copy()
+        return horizontal / norm
 
-        A racing quad has far more thrust than it needs to hover.  Mapping a
-        keyboard key directly into that full reserve makes a small numeric
-        throttle change behave like a launch.  Instead, 0.5 commands zero
-        vertical speed, values above/below it command climb/descent speed, and
-        a proportional vertical-velocity loop produces the collective thrust.
-        Tilt compensation keeps WASD steering from causing an altitude dump.
-        """
-        throttle = float(np.clip(self.input.throttle, 0.0, 1.0))
-        target_vertical_speed = (
-            (throttle - 0.5) * 2.0 * self.controls.max_vertical_speed_m_s
+    @staticmethod
+    def _clip_norm(vector: Vector, limit: float) -> Vector:
+        norm = float(np.linalg.norm(vector))
+        if norm <= limit or norm < 1e-12:
+            return vector
+        return vector * (limit / norm)
+
+    def _game_command(
+        self,
+        state: FlightState,
+        *,
+        forward_input: float,
+        right_input: float,
+        yaw_input: float,
+        target_vertical_speed_m_s: float,
+    ) -> PilotCommand:
+        """Close world-velocity and attitude loops, then emit body rates + thrust."""
+        q = state.q_body_to_world_wxyz
+        forward_world = self._horizontal_unit(
+            rotate(q, np.array([1.0, 0.0, 0.0], dtype=np.float64)),
+            np.array([1.0, 0.0, 0.0], dtype=np.float64),
         )
-        vertical_speed_error = target_vertical_speed - float(state.velocity_world_m_s[2])
+        left_world = self._horizontal_unit(
+            rotate(q, np.array([0.0, 1.0, 0.0], dtype=np.float64)),
+            np.array([0.0, 1.0, 0.0], dtype=np.float64),
+        )
+
+        desired_horizontal_velocity = self.controls.max_horizontal_speed_m_s * (
+            forward_input * forward_world - right_input * left_world
+        )
+        horizontal_error = desired_horizontal_velocity[:2] - state.velocity_world_m_s[:2]
+        horizontal_accel = np.array(
+            [
+                horizontal_error[0] * self.controls.horizontal_speed_kp,
+                horizontal_error[1] * self.controls.horizontal_speed_kp,
+                0.0,
+            ],
+            dtype=np.float64,
+        )
+        horizontal_accel = self._clip_norm(
+            horizontal_accel, self.controls.max_horizontal_accel_m_s2
+        )
+
+        vertical_error = target_vertical_speed_m_s - float(state.velocity_world_m_s[2])
         vertical_accel = float(
             np.clip(
-                self.controls.vertical_speed_kp * vertical_speed_error,
+                vertical_error * self.controls.vertical_speed_kp,
                 -self.controls.max_vertical_accel_m_s2,
                 self.controls.max_vertical_accel_m_s2,
             )
         )
-        body_up_world = rotate(state.q_body_to_world_wxyz, [0.0, 0.0, 1.0])
-        up_alignment = max(float(body_up_world[2]), self.controls.min_up_alignment)
-        desired_vertical_force = self.vehicle.mass_kg * (
-            self.vehicle.gravity_m_s2 + vertical_accel
+        desired_specific_force = np.array(
+            [
+                horizontal_accel[0],
+                horizontal_accel[1],
+                self.vehicle.gravity_m_s2 + vertical_accel,
+            ],
+            dtype=np.float64,
         )
-        collective = desired_vertical_force / up_alignment
-        return float(
-            np.clip(
-                collective,
-                0.0,
-                4.0 * self.vehicle.motor_max_thrust_n,
-            )
+        force_norm = float(np.linalg.norm(desired_specific_force))
+        if force_norm < 1e-9:
+            desired_up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+            collective = 0.0
+        else:
+            desired_up = desired_specific_force / force_norm
+            collective = self.vehicle.mass_kg * force_norm
+
+        # Preserve the current horizontal heading while tilting toward the
+        # acceleration vector.  Q/E adds yaw rate separately below.
+        desired_left = np.cross(desired_up, forward_world)
+        desired_left_norm = float(np.linalg.norm(desired_left))
+        if desired_left_norm < 1e-8:
+            desired_left = left_world
+        else:
+            desired_left = desired_left / desired_left_norm
+        desired_forward = np.cross(desired_left, desired_up)
+        desired_forward = desired_forward / max(float(np.linalg.norm(desired_forward)), 1e-8)
+        desired_rotation = np.column_stack((desired_forward, desired_left, desired_up))
+        target_q = from_rotation_matrix(desired_rotation)
+        attitude_error = rotation_vector_error(q, target_q)
+        rates = attitude_error * self.controls.attitude_kp
+        rates[2] += (
+            yaw_input
+            * self.vehicle.max_body_rate_rad_s[2]
+            * self.controls.yaw_rate_scale
+        )
+        rate_limit = np.minimum(
+            self.vehicle.max_body_rate_rad_s,
+            np.full(3, self.controls.max_stabilized_rate_rad_s, dtype=np.float64),
+        )
+        rates = np.clip(rates, -rate_limit, rate_limit)
+        collective = float(
+            np.clip(collective, 0.0, 4.0 * self.vehicle.motor_max_thrust_n)
+        )
+        return PilotCommand(collective_thrust_n=collective, body_rate_rad_s=rates)
+
+    def takeoff_command(self, state: FlightState, target_altitude_m: float) -> PilotCommand:
+        """Automatically rise from the pad and settle at the requested hover altitude."""
+        altitude_error = max(0.0, float(target_altitude_m) - float(state.position_world_m[2]))
+        target_vz = min(
+            self.controls.takeoff_max_speed_m_s,
+            altitude_error * self.controls.takeoff_altitude_kp,
+        )
+        return self._game_command(
+            state,
+            forward_input=0.0,
+            right_input=0.0,
+            yaw_input=0.0,
+            target_vertical_speed_m_s=target_vz,
         )
 
     def command(self, state: FlightState, race: RaceView, dt: float) -> PilotCommand:
         del race, dt
-        shaped = np.array(
-            [
-                deadzone_expo(
-                    self.input.roll, deadzone=self.controls.deadzone, expo=self.controls.expo
-                ),
-                deadzone_expo(
-                    self.input.pitch, deadzone=self.controls.deadzone, expo=self.controls.expo
-                ),
-                deadzone_expo(
-                    self.input.yaw, deadzone=self.controls.deadzone, expo=self.controls.expo
-                ),
-            ],
-            dtype=np.float64,
+        forward = deadzone_expo(
+            self.input.pitch, deadzone=self.controls.deadzone, expo=self.controls.expo
         )
-        rates: Vector = np.array(
-            [
-                shaped[0] * self.vehicle.max_body_rate_rad_s[0] * self.controls.roll_rate_scale,
-                shaped[1] * self.vehicle.max_body_rate_rad_s[1] * self.controls.pitch_rate_scale,
-                shaped[2] * self.vehicle.max_body_rate_rad_s[2] * self.controls.yaw_rate_scale,
-            ],
-            dtype=np.float64,
+        right = deadzone_expo(
+            self.input.roll, deadzone=self.controls.deadzone, expo=self.controls.expo
         )
-        return PilotCommand(
-            collective_thrust_n=self._stabilized_collective(state),
-            body_rate_rad_s=rates,
+        yaw = deadzone_expo(
+            self.input.yaw, deadzone=self.controls.deadzone, expo=self.controls.expo
+        )
+        throttle = float(np.clip(self.input.throttle, 0.0, 1.0))
+        target_vz = (throttle - 0.5) * 2.0 * self.controls.max_vertical_speed_m_s
+        return self._game_command(
+            state,
+            forward_input=forward,
+            right_input=right,
+            yaw_input=yaw,
+            target_vertical_speed_m_s=target_vz,
         )
