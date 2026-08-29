@@ -9,6 +9,7 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import NDArray
 
+from flightstack.math.quaternion import rotate
 from flightstack.race import RaceState
 from flightstack.sim.vehicle import FlightState, PilotCommand, VehicleConfig
 
@@ -67,9 +68,10 @@ def deadzone_expo(value: float, *, deadzone: float, expo: float) -> float:
 def hover_centered_collective(throttle: float, config: VehicleConfig) -> float:
     """Map a human throttle in ``[0, 1]`` with 0.5 at physical hover.
 
-    This avoids coupling manual-stick feel to an arbitrary per-motor maximum:
-    zero remains disarmed/minimum thrust, midpoint reliably means level hover,
-    and the upper half spans the remaining available collective authority.
+    This low-level mapping is retained for direct/acro-style experiments.  The
+    default interactive human pilot uses a stabilized vertical-speed mapping
+    below so keyboard altitude controls do not turn the large racing-quad
+    thrust reserve into an accidental launch command.
     """
     value = float(throttle)
     if not np.isfinite(value):
@@ -109,6 +111,10 @@ class ManualControlConfig:
     roll_rate_scale: float = 1.0
     pitch_rate_scale: float = 1.0
     yaw_rate_scale: float = 0.82
+    max_vertical_speed_m_s: float = 3.0
+    vertical_speed_kp: float = 3.0
+    max_vertical_accel_m_s2: float = 4.0
+    min_up_alignment: float = 0.35
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.deadzone < 1.0:
@@ -117,6 +123,14 @@ class ManualControlConfig:
             raise ValueError("expo must be in [0, 1]")
         if min(self.roll_rate_scale, self.pitch_rate_scale, self.yaw_rate_scale) <= 0.0:
             raise ValueError("manual rate scales must be positive")
+        if self.max_vertical_speed_m_s <= 0.0:
+            raise ValueError("max_vertical_speed_m_s must be positive")
+        if self.vertical_speed_kp <= 0.0:
+            raise ValueError("vertical_speed_kp must be positive")
+        if self.max_vertical_accel_m_s2 <= 0.0:
+            raise ValueError("max_vertical_accel_m_s2 must be positive")
+        if not 0.0 < self.min_up_alignment <= 1.0:
+            raise ValueError("min_up_alignment must be in (0, 1]")
 
 
 class HumanPilot:
@@ -140,8 +154,44 @@ class HumanPilot:
         del initial_state
         self.input = ManualInput()
 
+    def _stabilized_collective(self, state: FlightState) -> float:
+        """Convert centered throttle into a bounded vertical-speed command.
+
+        A racing quad has far more thrust than it needs to hover.  Mapping a
+        keyboard key directly into that full reserve makes a small numeric
+        throttle change behave like a launch.  Instead, 0.5 commands zero
+        vertical speed, values above/below it command climb/descent speed, and
+        a proportional vertical-velocity loop produces the collective thrust.
+        Tilt compensation keeps WASD steering from causing an altitude dump.
+        """
+        throttle = float(np.clip(self.input.throttle, 0.0, 1.0))
+        target_vertical_speed = (
+            (throttle - 0.5) * 2.0 * self.controls.max_vertical_speed_m_s
+        )
+        vertical_speed_error = target_vertical_speed - float(state.velocity_world_m_s[2])
+        vertical_accel = float(
+            np.clip(
+                self.controls.vertical_speed_kp * vertical_speed_error,
+                -self.controls.max_vertical_accel_m_s2,
+                self.controls.max_vertical_accel_m_s2,
+            )
+        )
+        body_up_world = rotate(state.q_body_to_world_wxyz, [0.0, 0.0, 1.0])
+        up_alignment = max(float(body_up_world[2]), self.controls.min_up_alignment)
+        desired_vertical_force = self.vehicle.mass_kg * (
+            self.vehicle.gravity_m_s2 + vertical_accel
+        )
+        collective = desired_vertical_force / up_alignment
+        return float(
+            np.clip(
+                collective,
+                0.0,
+                4.0 * self.vehicle.motor_max_thrust_n,
+            )
+        )
+
     def command(self, state: FlightState, race: RaceView, dt: float) -> PilotCommand:
-        del state, race, dt
+        del race, dt
         shaped = np.array(
             [
                 deadzone_expo(
@@ -165,6 +215,6 @@ class HumanPilot:
             dtype=np.float64,
         )
         return PilotCommand(
-            collective_thrust_n=hover_centered_collective(self.input.throttle, self.vehicle),
+            collective_thrust_n=self._stabilized_collective(state),
             body_rate_rad_s=rates,
         )
