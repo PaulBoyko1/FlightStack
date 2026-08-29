@@ -241,7 +241,21 @@ class HumanPilot:
             collective = 0.0
         else:
             desired_up = desired_specific_force / force_norm
-            collective = self.vehicle.mass_kg * force_norm
+            # Keep the vertical force target correct while attitude slews into
+            # an aggressive horizontal acceleration. Applying the final vector
+            # magnitude while the craft is still upright creates an unwanted
+            # altitude pop; compensating against the current body-Z projection
+            # lets horizontal authority build as the vehicle actually tilts.
+            current_up = rotate(q, np.array([0.0, 0.0, 1.0], dtype=np.float64))
+            vertical_projection = max(float(current_up[2]), 0.25)
+            desired_vertical_specific_force = max(
+                0.0, self.vehicle.gravity_m_s2 + vertical_accel
+            )
+            collective = (
+                self.vehicle.mass_kg
+                * desired_vertical_specific_force
+                / vertical_projection
+            )
 
         # Preserve the current horizontal heading while tilting toward the
         # acceleration vector.  Q/E adds yaw rate separately below.
