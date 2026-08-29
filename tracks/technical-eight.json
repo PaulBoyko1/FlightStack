@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "name": "technical-eight",
-  "description": "An expanded eight-gate figure-eight reference course with alternating heights and angled gates.",
+  "description": "A large eight-gate figure-eight reference course with long acceleration zones, alternating heights, and angled gates.",
   "default_laps": 1,
   "ground_height_m": 0.0,
-  "start_position_world_m": [0.0, -8.1, 1.2],
+  "start_position_world_m": [0.0, -16.2, 1.2],
   "gates": [
     {
       "id": "start-split",
-      "center_world_m": [0.0, -6.0, 1.45],
+      "center_world_m": [0.0, -12.0, 1.45],
       "normal_world": [0.0, 1.0, 0.0],
       "right_world": [-1.0, 0.0, 0.0],
       "up_world": [0.0, 0.0, 1.0],
@@ -19,7 +19,7 @@
     },
     {
       "id": "left-entry",
-      "center_world_m": [-3.375, -2.775, 1.95],
+      "center_world_m": [-6.75, -5.55, 1.95],
       "normal_world": [-0.7071067812, 0.7071067812, 0.0],
       "right_world": [-0.7071067812, -0.7071067812, 0.0],
       "up_world": [0.0, 0.0, 1.0],
@@ -30,7 +30,7 @@
     },
     {
       "id": "left-apex",
-      "center_world_m": [-5.85, 0.225, 1.45],
+      "center_world_m": [-11.7, 0.45, 1.45],
       "normal_world": [0.0, 1.0, 0.0],
       "right_world": [-1.0, 0.0, 0.0],
       "up_world": [0.0, 0.0, 1.0],
@@ -41,7 +41,7 @@
     },
     {
       "id": "left-exit",
-      "center_world_m": [-3.075, 3.3, 1.75],
+      "center_world_m": [-6.15, 6.6, 1.75],
       "normal_world": [0.7071067812, 0.7071067812, 0.0],
       "right_world": [-0.7071067812, 0.7071067812, 0.0],
       "up_world": [0.0, 0.0, 1.0],
@@ -63,7 +63,7 @@
     },
     {
       "id": "right-entry",
-      "center_world_m": [3.075, 3.3, 1.7],
+      "center_world_m": [6.15, 6.6, 1.7],
       "normal_world": [0.7071067812, 0.7071067812, 0.0],
       "right_world": [-0.7071067812, 0.7071067812, 0.0],
       "up_world": [0.0, 0.0, 1.0],
@@ -74,7 +74,7 @@
     },
     {
       "id": "right-apex",
-      "center_world_m": [5.85, 0.225, 1.4],
+      "center_world_m": [11.7, 0.45, 1.4],
       "normal_world": [0.0, -1.0, 0.0],
       "right_world": [1.0, 0.0, 0.0],
       "up_world": [0.0, 0.0, 1.0],
@@ -85,7 +85,7 @@
     },
     {
       "id": "right-exit",
-      "center_world_m": [3.45, -2.85, 1.9],
+      "center_world_m": [6.9, -5.7, 1.9],
       "normal_world": [-0.7071067812, -0.7071067812, 0.0],
       "right_world": [0.7071067812, -0.7071067812, 0.0],
       "up_world": [0.0, 0.0, 1.0],
