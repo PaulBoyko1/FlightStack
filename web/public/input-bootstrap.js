@@ -21,14 +21,13 @@
     }
   }
 
-  // main.ts historically maps A/D to roll/strafe and Q/E to yaw. Keep that
-  // low-level input contract stable while exposing a more familiar game layout:
-  // A/D turn the nose; Q/E strafe left/right.
+  // main.ts already maps A/D to right/left strafe and Q/E to yaw. Preserve
+  // A/D exactly as-is. FlightStack's positive body yaw turns left in the world
+  // frame, so swap only Q/E at the browser boundary to make the game controls
+  // intuitive: Q turns left and E turns right.
   const remappedKeys = {
-    KeyA: "KeyQ",
-    KeyD: "KeyE",
-    KeyQ: "KeyA",
-    KeyE: "KeyD",
+    KeyQ: "KeyE",
+    KeyE: "KeyQ",
   };
 
   const forwardRemappedKey = (event, type) => {
