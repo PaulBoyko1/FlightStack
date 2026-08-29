@@ -128,7 +128,6 @@ class FlightSession:
 
     @classmethod
     def create(cls, *, policy_path: str | Path | None = None) -> FlightSession:
-        """Construct a session and optionally validate a learned checkpoint."""
         config = VehicleConfig.from_toml()
         track = load_technical_eight()
         configured_start = (
@@ -244,6 +243,18 @@ class FlightSession:
         )
         return events
 
+    def _prepare_autonomous_start(self) -> None:
+        """Restore the historical airborne start before an autonomous run."""
+        state = _initial_state(self.config, self._configured_start(), motors_idle=False)
+        self.runtime.reset(state)
+        self.classical.reset(state)
+        if self.learned is not None:
+            self.learned.reset(state)
+        self.race.reset(0.0)
+        self.crashed = False
+        self.manual_takeoff_active = False
+        self.last_command = None
+
     def set_manual_input(self, payload: dict[str, Any]) -> None:
         try:
             input_state = ManualInput(
@@ -269,7 +280,9 @@ class FlightSession:
                 "`python -m flightstack.ai.training --output models/run --smoke`, "
                 "then launch `flightstack serve --policy models/run/ppo_model.zip`."
             )
-        self.pilot = selected
+        if selected is not self.pilot:
+            self.pilot = selected
+            self.reset()
         return None
 
     def _manual_takeoff_complete(self, state: FlightState) -> bool:
@@ -288,9 +301,6 @@ class FlightSession:
 
         if not self.armed:
             if self.pilot is PilotKind.HUMAN:
-                # Grounded manual sessions are genuinely inert.  The existing
-                # browser sends 0.62 while Space is held and 0.5 at neutral, so
-                # Space is an explicit takeoff trigger without a protocol fork.
                 if self.human.input.throttle <= MANUAL_TAKEOFF_TRIGGER:
                     self.last_command = PilotCommand(
                         0.0, np.zeros(3, dtype=np.float64)
@@ -300,6 +310,17 @@ class FlightSession:
                 self.manual_takeoff_active = True
                 command = self.current_command
             else:
+                # FlightSession defaults to the human grounded state.  Direct
+                # internal pilot assignment and UI mode changes must not make
+                # autonomous baselines launch from that pad state.
+                ground_ceiling = (
+                    self.race.track.ground_height_m
+                    + VEHICLE_COLLISION_RADIUS_M
+                    + 0.1
+                )
+                if float(previous.position_world_m[2]) <= ground_ceiling:
+                    self._prepare_autonomous_start()
+                    previous = self.state
                 self.armed = True
                 startup_events = self.race.start(previous.sim_time_s)
                 command = self.current_command
