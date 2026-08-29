@@ -21,6 +21,34 @@
     }
   }
 
+  // main.ts historically maps A/D to roll/strafe and Q/E to yaw. Keep that
+  // low-level input contract stable while exposing a more familiar game layout:
+  // A/D turn the nose; Q/E strafe left/right.
+  const remappedKeys = {
+    KeyA: "KeyQ",
+    KeyD: "KeyE",
+    KeyQ: "KeyA",
+    KeyE: "KeyD",
+  };
+
+  const forwardRemappedKey = (event, type) => {
+    if (!event.isTrusted) return false;
+    const mappedCode = remappedKeys[event.code];
+    if (!mappedCode) return false;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    window.dispatchEvent(
+      new KeyboardEvent(type, {
+        bubbles: true,
+        code: mappedCode,
+        key: event.key,
+        repeat: event.repeat,
+      }),
+    );
+    return true;
+  };
+
   let firstSpaceStartsTakeoff = true;
   let suppressFirstSpaceRepeats = false;
 
@@ -32,6 +60,8 @@
   window.addEventListener(
     "keydown",
     (event) => {
+      if (forwardRemappedKey(event, "keydown")) return;
+
       // Reset and returning to Human mode both create a new grounded run.
       if (!event.repeat && (event.code === "KeyR" || event.code === "Digit1")) {
         rearmTakeoffKey();
@@ -72,6 +102,8 @@
   window.addEventListener(
     "keyup",
     (event) => {
+      if (forwardRemappedKey(event, "keyup")) return;
+
       if (event.code === "Space" && event.isTrusted) {
         suppressFirstSpaceRepeats = false;
       }
