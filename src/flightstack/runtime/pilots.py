@@ -112,14 +112,14 @@ class ManualInput:
 @dataclass(frozen=True)
 class ManualControlConfig:
     deadzone: float = 0.07
-    expo: float = 0.32
-    yaw_rate_scale: float = 0.72
+    expo: float = 0.18
+    yaw_rate_scale: float = 0.90
     max_vertical_speed_m_s: float = 2.2
     vertical_speed_kp: float = 3.2
     max_vertical_accel_m_s2: float = 4.0
-    max_horizontal_speed_m_s: float = 4.5
-    horizontal_speed_kp: float = 2.4
-    max_horizontal_accel_m_s2: float = 5.0
+    max_horizontal_speed_m_s: float = 22.0
+    horizontal_speed_kp: float = 3.2
+    max_horizontal_accel_m_s2: float = 14.0
     attitude_kp: float = 5.0
     max_stabilized_rate_rad_s: float = 4.0
     takeoff_max_speed_m_s: float = 1.4
