@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
+from flightstack.math.quaternion import from_euler
 from flightstack.runtime.pilots import (
     HumanPilot,
     ManualControlConfig,
@@ -61,10 +62,24 @@ def test_w_input_requests_forward_motion_without_direct_acro_rates() -> None:
 
     command = pilot.command(state, EmptyRace(), 0.002)
 
-    # W means forward velocity intent.  The stabilizer chooses the required
-    # pitch rate rather than mapping 0.42 directly to 42% of maximum body rate.
+    # W means forward velocity intent. The stabilizer first requests pitch while
+    # holding only the vertical force required to hover. Extra collective is
+    # introduced as the craft actually tilts instead of creating an altitude pop
+    # while it is still upright.
     assert command.body_rate_rad_s[1] > 0.0
     assert command.body_rate_rad_s[1] < vehicle.max_body_rate_rad_s[1] * 0.8
+    assert command.collective_thrust_n == pytest.approx(vehicle.hover_thrust_n)
+
+
+def test_tilted_forward_motion_compensates_collective_to_hold_altitude() -> None:
+    vehicle = config()
+    pilot = HumanPilot(vehicle, ManualControlConfig(deadzone=0.0, expo=0.0))
+    state = FlightState.hovering(vehicle)
+    state.q_body_to_world_wxyz = from_euler(0.0, np.deg2rad(30.0), 0.0)
+    pilot.set_input(ManualInput(throttle=0.5, pitch=0.42))
+
+    command = pilot.command(state, EmptyRace(), 0.002)
+
     assert command.collective_thrust_n > vehicle.hover_thrust_n
 
 
