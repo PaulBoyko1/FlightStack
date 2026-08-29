@@ -288,7 +288,6 @@ let activePilot: "human" | "classical" | "learned" = "human";
 
 const KEYBOARD_ROLL_PITCH = 0.42;
 const KEYBOARD_YAW = 0.34;
-const KEYBOARD_THROTTLE_RATE = 0.32;
 const input = { roll: 0, pitch: 0, yaw: 0, throttle: 0.5 };
 const pressed = new Set<string>();
 let toastTimeout = 0;
@@ -448,7 +447,7 @@ const connect = (): void => {
   socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
   socket.addEventListener("open", () => {
     updateConnection(true);
-    showToast("Manual flight ready — WASD to move, Space/Shift for throttle");
+    showToast("Manual flight ready — WASD to move, Space/Shift for altitude");
     send({ type: "set_pilot", pilot: activePilot });
   });
   socket.addEventListener("message", (event) => {
@@ -479,15 +478,23 @@ const updateInput = (elapsedSeconds: number): void => {
     input.throttle = THREE.MathUtils.clamp((1 - throttleAxis) * 0.5, 0, 1);
   } else {
     const throttleDown = pressed.has("ShiftLeft") || pressed.has("ShiftRight") || pressed.has("ControlLeft");
-    input.throttle = THREE.MathUtils.clamp(
-      input.throttle + ((pressed.has("Space") ? 1 : 0) - (throttleDown ? 1 : 0)) * elapsedSeconds * KEYBOARD_THROTTLE_RATE,
-      0,
-      1,
-    );
+    input.throttle = pressed.has("Space") ? 0.62 : throttleDown ? 0.38 : 0.5;
   }
   input.roll = THREE.MathUtils.damp(input.roll, target.roll, 14, elapsedSeconds);
   input.pitch = THREE.MathUtils.damp(input.pitch, target.pitch, 14, elapsedSeconds);
   input.yaw = THREE.MathUtils.damp(input.yaw, target.yaw, 14, elapsedSeconds);
+};
+
+const resetFlight = (): void => {
+  pressed.clear();
+  input.roll = 0;
+  input.pitch = 0;
+  input.yaw = 0;
+  input.throttle = 0.5;
+  send({ type: "reset" });
+  const centeredInput: InputMessage = { type: "manual_input", ...input };
+  send(centeredInput);
+  showToast("Reset — controls centered at hover");
 };
 
 window.addEventListener("keydown", (event) => {
@@ -496,7 +503,7 @@ window.addEventListener("keydown", (event) => {
     pressed.add(event.code);
   }
   if (!event.repeat) {
-    if (event.code === "KeyR") send({ type: "reset" });
+    if (event.code === "KeyR") resetFlight();
     if (event.code === "KeyC") cycleCamera();
     if (event.code === "KeyT") toggleTechnical();
     if (event.code === "Digit1") selectPilot("human");
@@ -526,7 +533,7 @@ const selectPilot = (pilot: "human" | "classical" | "learned"): void => {
   showToast(`${pilot.toUpperCase()} pilot requested`);
 };
 
-dom.reset.addEventListener("click", () => send({ type: "reset" }));
+dom.reset.addEventListener("click", resetFlight);
 dom.camera.addEventListener("click", cycleCamera);
 dom.technical.addEventListener("click", toggleTechnical);
 document.querySelectorAll<HTMLButtonElement>(".mode").forEach((button) => {
