@@ -80,11 +80,14 @@ def test_body_z_rotation_contract_is_available_to_guidance() -> None:
 def test_classical_baseline_finishes_reference_technical_eight() -> None:
     session = FlightSession.create()
     session.pilot = PilotKind.CLASSICAL
-    for _ in range(10_000):
+    # The expanded course is 1.5x wider in X/Y than the original reference
+    # layout. Keep the deterministic completion requirement, but give the
+    # controller enough simulated time to traverse the longer geometry.
+    for _ in range(20_000):
         session.step()
         if session.crashed or session.race.finished:
             break
     assert not session.crashed
     assert session.race.finished
     assert session.race.best_lap_s is not None
-    assert session.race.best_lap_s < 20.0
+    assert session.race.best_lap_s < 35.0
