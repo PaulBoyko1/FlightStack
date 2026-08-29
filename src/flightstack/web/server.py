@@ -45,9 +45,34 @@ MAX_CATCHUP_STEPS = 100
 # consuming a run while no person has had a chance to send an input.
 MANUAL_ARM_COLLECTIVE_FRACTION = 0.95
 
+
 def default_web_dist() -> Path:
     """Locate the Vite production bundle relative to the tracked repository."""
     return Path(__file__).resolve().parents[3] / "web" / "dist"
+
+
+def _web_bundle_is_stale(web_root: Path) -> bool:
+    """Return whether tracked frontend inputs are newer than the Vite entrypoint."""
+    entry = web_root / "index.html"
+    if not entry.is_file():
+        return False
+    source_root = web_root.parent
+    source_files = [
+        source_root / "index.html",
+        source_root / "package.json",
+        source_root / "pnpm-lock.yaml",
+    ]
+    source_dir = source_root / "src"
+    if source_dir.is_dir():
+        source_files.extend(path for path in source_dir.rglob("*") if path.is_file())
+    try:
+        bundle_mtime_ns = entry.stat().st_mtime_ns
+        return any(
+            path.is_file() and path.stat().st_mtime_ns > bundle_mtime_ns
+            for path in source_files
+        )
+    except OSError:
+        return False
 
 
 def _event_mapping(event: RaceEvent) -> dict[str, object]:
@@ -333,6 +358,7 @@ SESSION_KEY: web.AppKey[FlightSession] = web.AppKey("session", FlightSession)
 CLIENTS_KEY: web.AppKey[set[web.WebSocketResponse]] = web.AppKey("clients", set)
 PHYSICS_TASK_KEY: web.AppKey[asyncio.Task[None]] = web.AppKey("physics_task", asyncio.Task)
 WEB_ROOT_KEY: web.AppKey[Path] = web.AppKey("web_root", Path)
+CHECK_WEB_FRESHNESS_KEY: web.AppKey[bool] = web.AppKey("check_web_freshness", bool)
 
 
 async def _broadcast(app: web.Application) -> None:
@@ -403,7 +429,19 @@ async def root(request: web.Request) -> web.StreamResponse:
     web_root = request.app[WEB_ROOT_KEY]
     entry = web_root / "index.html"
     if entry.is_file():
-        return web.FileResponse(entry)
+        if request.app[CHECK_WEB_FRESHNESS_KEY] and _web_bundle_is_stale(web_root):
+            return web.Response(
+                text=(
+                    "FlightStack web client is stale: tracked frontend source is newer than "
+                    "web/dist. Run `cd web && pnpm install --frozen-lockfile && pnpm run build` "
+                    "then restart `flightstack serve`."
+                ),
+                content_type="text/plain",
+                status=503,
+            )
+        response = web.FileResponse(entry)
+        response.headers["Cache-Control"] = "no-store"
+        return response
     return web.Response(
         text=(
             "FlightStack web client is not built. Run `cd web && pnpm install && pnpm run build` "
@@ -467,6 +505,7 @@ def create_app(
     )
     app[CLIENTS_KEY] = set()
     app[WEB_ROOT_KEY] = default_web_dist() if web_root is None else web_root
+    app[CHECK_WEB_FRESHNESS_KEY] = web_root is None
     app.on_startup.append(_on_startup)
     app.on_cleanup.append(_on_cleanup)
     app.router.add_get("/healthz", healthz)
